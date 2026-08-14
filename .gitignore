@@ -1,0 +1,26 @@
+node_modules/
+dist/
+
+deepseek-harness/node_modules/
+deepseek-harness/apps/cli/lib/
+deepseek-harness/apps/web/dist/
+deepseek-harness/packages/*/*/lib/
+deepseek-harness/vendor/*/lib/
+deepseek-harness/native/landlock-run/lib/
+deepseek-harness/website/.vitepress/cache/
+deepseek-harness/website/.vitepress/dist/
+
+*.log
+pnpm-debug.log*
+
+# Local build/test scratch — never part of the repository
+output/
+website/download/win-unpacked/
+website/download/*.exe
+website/download/builder-debug.yml
+website/build-output/
+website/fast-output/
+cockpit-tools/
+$testDir/
+prototypes/
+.playwright-mcp/

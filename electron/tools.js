@@ -1,0 +1,681 @@
+/**
+ * DSH Desktop tools workbench — browser half. Codex project import renders a
+ * cockpit-style workbench: on open it auto-scans the Codex sessions directory,
+ * groups rollouts by working directory into a searchable/sortable project
+ * list, marks already-imported sessions, and imports the selection into the
+ * Harness in one shot.
+ */
+
+const api = window.dshDesktop
+
+// ---------- state ----------
+
+const state = {
+  config: null, // { sessions: {customRoot, defaultRoot, effectiveRoot}, targetRoot }
+  projects: [], // [{ name, cwd, shallow, sessions: [...] }]
+  importedCount: 0,
+  projectChecked: new Map(), // cwd -> bool
+  sessionChecked: new Map(), // cwd -> Set(sessionKey)
+  search: '',
+  sort: 'recent',
+  running: false,
+  activeTool: 'codex-import',
+}
+
+const updateState = {
+  checked: false, // an explicit update:check has run at least once
+  checking: false,
+  downloading: false,
+  info: null, // last update:info snapshot
+}
+
+const sessionKey = (session) => `${session.id}::${session.file}`
+
+// ---------- dom helpers ----------
+
+const $ = (id) => document.getElementById(id)
+
+function showToast(message, isError = false) {
+  const toast = $('toast')
+  toast.textContent = message
+  toast.classList.toggle('toast--error', isError)
+  toast.classList.add('is-visible')
+  clearTimeout(showToast._timer)
+  showToast._timer = setTimeout(() => toast.classList.remove('is-visible'), 3200)
+}
+
+function formatDate(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function formatRelative(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  const delta = Date.now() - date.getTime()
+  const minute = 60_000
+  const hour = 60 * minute
+  const day = 24 * hour
+  if (delta < minute) return '刚刚'
+  if (delta < hour) return `${Math.floor(delta / minute)} 分钟前`
+  if (delta < day) return `${Math.floor(delta / hour)} 小时前`
+  if (delta < 30 * day) return `${Math.floor(delta / day)} 天前`
+  return date.toLocaleDateString('zh-CN')
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[ch])
+}
+
+function formatBytes(value) {
+  if (!Number.isFinite(value) || value < 0) return '—'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let size = value
+  let unit = 0
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024
+    unit += 1
+  }
+  return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
+}
+
+function projectIcon(project) {
+  const name = project.name.toLowerCase()
+  if (name.includes('rust') || project.cwd.toLowerCase().includes('rust')) return '🦀'
+  if (name.includes('python') || name.includes('py')) return '🐍'
+  if (name.includes('flutter') || name.includes('dart')) return '🪽'
+  if (name.includes('android') || name.includes('kotlin')) return '🤖'
+  if (name.includes('java')) return '☕'
+  if (name.includes('js') || name.includes('node') || name.includes('web')) return '⬡'
+  if (name.includes('go')) return '🐹'
+  return '📁'
+}
+
+// ---------- config ----------
+
+function renderConfig(config) {
+  state.config = config
+  $('sessions-dir-path').textContent = config.sessions.effectiveRoot
+  const custom = config.sessions.customRoot !== null
+  $('sessions-dir-badge').textContent = custom ? '自定义目录' : '自动检测'
+  $('sessions-dir-badge').className = custom ? 'badge badge--warn' : 'badge badge--ok'
+  $('reset-sessions-dir').disabled = !custom
+  $('target-path').textContent = config.targetRoot
+}
+
+// ---------- scan & render ----------
+
+async function refreshAll() {
+  const [config, scan] = await Promise.all([api.getImportConfig(), api.scanAll()])
+  renderConfig(config)
+  state.projects = scan.projects
+  state.importedCount = scan.importedCount ?? 0
+  state.projectChecked.clear()
+  state.sessionChecked.clear()
+  renderProjects()
+  updateSummary()
+}
+
+function visibleProjects() {
+  const query = state.search.trim().toLowerCase()
+  let projects = state.projects
+  if (query !== '') {
+    projects = projects.filter((project) => {
+      if (project.name.toLowerCase().includes(query)) return true
+      if (project.cwd.toLowerCase().includes(query)) return true
+      return project.sessions.some((s) => (s.title || s.id || '').toLowerCase().includes(query))
+    })
+  }
+  const sorted = [...projects]
+  if (state.sort === 'name') {
+    sorted.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+  } else if (state.sort === 'sessions') {
+    sorted.sort((a, b) => b.sessions.length - a.sessions.length)
+  } else if (state.sort === 'recent') {
+    sorted.sort((a, b) => latestTime(b) - latestTime(a))
+  }
+  return sorted
+}
+
+function latestTime(project) {
+  let latest = 0
+  for (const session of project.sessions) {
+    const time = Date.parse(session.startedAt ?? '')
+    if (!Number.isNaN(time) && time > latest) latest = time
+  }
+  return latest
+}
+
+function renderProjects() {
+  const list = $('project-list')
+  const projects = visibleProjects()
+  if (state.projects.length === 0) {
+    list.innerHTML = '<div class="empty-note">未在会话目录中发现任何 Codex 会话</div>'
+    return
+  }
+  if (projects.length === 0) {
+    list.innerHTML = '<div class="empty-note">没有匹配搜索条件的项目或会话</div>'
+    return
+  }
+  list.innerHTML = ''
+  for (const project of projects) {
+    const group = document.createElement('div')
+    group.className = 'project-group'
+    const shallowBadge = project.shallow
+      ? '<span class="badge badge--warn" title="该目录层级过浅（如用户主目录），只导入会话，不复制项目代码">仅会话</span>'
+      : ''
+    const importedInGroup = project.sessions.filter((s) => s.imported).length
+    const importedBadge = importedInGroup > 0
+      ? `<span class="badge badge--muted" title="其中 ${importedInGroup} 个会话已导入过">已导入 ${importedInGroup}</span>`
+      : ''
+    group.innerHTML = `
+      <div class="project-group__head">
+        <input class="project-group__check" type="checkbox" />
+        <span class="project-group__icon">${projectIcon(project)}</span>
+        <span class="project-group__names">
+          <span class="project-group__name"></span>
+          <span class="project-group__path"></span>
+        </span>
+        <span class="badge badge--ok">${project.sessions.length} 个会话</span>
+        ${importedBadge}
+        ${shallowBadge}
+        <span class="project-group__recent"></span>
+        <span class="project-group__chevron" aria-hidden="true">▸</span>
+      </div>
+      <div class="project-group__sessions" hidden></div>`
+    group.querySelector('.project-group__name').textContent = project.name
+    group.querySelector('.project-group__path').textContent = project.cwd
+    const recent = latestTime(project)
+    group.querySelector('.project-group__recent').textContent = recent > 0 ? `最近 ${formatRelative(recent)}` : ''
+    const checkbox = group.querySelector('.project-group__check')
+    const chevron = group.querySelector('.project-group__chevron')
+    const head = group.querySelector('.project-group__head')
+    const sessionsBox = group.querySelector('.project-group__sessions')
+
+    // A single click anywhere on the row (except the checkbox) expands or
+    // collapses the session list; the checkbox keeps tick/untick semantics.
+    head.addEventListener('click', (event) => {
+      if (event.target.closest('.project-group__check')) return
+      const hidden = sessionsBox.hidden
+      sessionsBox.hidden = !hidden
+      chevron.textContent = hidden ? '▾' : '▸'
+    })
+
+    const sessionSet = state.sessionChecked.get(project.cwd) ?? new Set()
+    state.sessionChecked.set(project.cwd, sessionSet)
+    const query = state.search.trim().toLowerCase()
+    const visibleSessions = query === ''
+      ? project.sessions
+      : project.sessions.filter((s) => (s.title || s.id || '').toLowerCase().includes(query))
+    for (const session of visibleSessions) {
+      const key = sessionKey(session)
+      const row = document.createElement('label')
+      row.className = 'session-item'
+      if (session.imported) row.classList.add('is-imported')
+      row.innerHTML = `
+        <input type="checkbox" />
+        <span class="session-item__icon">💬</span>
+        <span class="session-item__copy">
+          <strong></strong>
+          <small></small>
+        </span>
+        ${session.model ? `<span class="badge badge--muted model-badge"></span>` : ''}
+        ${session.imported ? '<span class="badge badge--imported">已导入</span>' : ''}
+        <span class="session-item__time"></span>`
+      row.querySelector('strong').textContent = session.title || session.id || '未命名会话'
+      row.querySelector('small').textContent = session.id ?? ''
+      const modelBadge = row.querySelector('.model-badge')
+      if (modelBadge) modelBadge.textContent = session.model
+      row.querySelector('.session-item__time').textContent = formatRelative(session.startedAt)
+      const input = row.querySelector('input')
+      // Nothing is pre-selected: ticking is the user's explicit choice.
+      if (session.imported) sessionSet.delete(key)
+      const applySession = () => {
+        if (input.checked) sessionSet.add(key)
+        else sessionSet.delete(key)
+        if (!input.checked && checkbox.checked) {
+          checkbox.checked = false
+          state.projectChecked.delete(project.cwd)
+        }
+        updateSummary()
+      }
+      input.addEventListener('change', applySession)
+      sessionsBox.appendChild(row)
+    }
+
+    // Project checkbox reflects all its sessions being checked.
+    checkbox.checked = visibleSessions.length > 0 && visibleSessions.every((s) => sessionSet.has(sessionKey(s)))
+    checkbox.addEventListener('change', () => {
+      const checked = checkbox.checked
+      if (checked) state.projectChecked.set(project.cwd, true)
+      else state.projectChecked.delete(project.cwd)
+      // Project tick selects EVERY session, imported ones included: the
+      // import step skips already-imported sessions and reports the skip.
+      for (const row of sessionsBox.querySelectorAll('.session-item')) {
+        const input = row.querySelector('input')
+        input.checked = checked
+        input.dispatchEvent(new Event('change'))
+      }
+      updateSummary()
+    })
+    list.appendChild(group)
+  }
+  updateSummary()
+}
+
+function updateSummary() {
+  const projectCount = state.projectChecked.size
+  let sessionCount = 0
+  for (const set of state.sessionChecked.values()) sessionCount += set.size
+  const totalProjects = state.projects.length
+  const totalSessions = state.projects.reduce((n, p) => n + p.sessions.length, 0)
+  $('stat-projects').textContent = String(totalProjects)
+  $('stat-sessions').textContent = String(totalSessions)
+  $('stat-checked-projects').textContent = String(projectCount)
+  $('stat-checked-sessions').textContent = String(sessionCount)
+  $('stat-imported').textContent = String(state.importedCount)
+  $('selection-summary').textContent = sessionCount === 0
+    ? '未选择任何内容'
+    : `已选 ${projectCount} 个项目 · ${sessionCount} 个会话`
+  $('run-import').disabled = sessionCount === 0 || state.running
+}
+
+function setAllChecked(checked) {
+  for (const project of state.projects) {
+    if (checked) state.projectChecked.set(project.cwd, true)
+    else state.projectChecked.delete(project.cwd)
+    const set = state.sessionChecked.get(project.cwd) ?? new Set()
+    state.sessionChecked.set(project.cwd, set)
+    set.clear()
+    if (checked) {
+      for (const session of project.sessions) set.add(sessionKey(session))
+    }
+  }
+  renderProjects()
+}
+
+function setAllExpanded(expanded) {
+  for (const group of document.querySelectorAll('.project-group')) {
+    const box = group.querySelector('.project-group__sessions')
+    const chevron = group.querySelector('.project-group__chevron')
+    box.hidden = !expanded
+    chevron.textContent = expanded ? '▾' : '▸'
+  }
+}
+
+// ---------- one-shot import ----------
+
+async function runImport() {
+  if (state.running) return
+  const selection = []
+  let skippedImported = 0
+  for (const project of state.projects) {
+    const set = state.sessionChecked.get(project.cwd)
+    if (!set || set.size === 0) continue
+    const rollouts = project.sessions.filter((s) => {
+      if (!set.has(sessionKey(s))) return false
+      // Already-imported sessions are never re-imported: re-running the
+      // conversion would overwrite a log the harness may have appended to.
+      if (s.imported) {
+        skippedImported += 1
+        return false
+      }
+      return true
+    })
+    if (rollouts.length === 0) continue
+    selection.push({
+      name: project.name,
+      cwd: project.cwd,
+      shallow: project.shallow,
+      rollouts,
+    })
+  }
+  if (selection.length === 0) {
+    showToast(skippedImported > 0
+      ? `所选会话均已导入过，无需重复导入（${skippedImported} 个已跳过）`
+      : '未选择任何会话')
+    return
+  }
+
+  state.running = true
+  $('run-import').disabled = true
+  $('progress-box').hidden = false
+  $('done-report').hidden = true
+  setProgress(0, '开始导入…', '')
+  if (skippedImported > 0) {
+    showToast(`已跳过 ${skippedImported} 个已导入过的会话`, false)
+  }
+
+  try {
+    const results = await api.runImport(selection)
+    renderDone(results, skippedImported)
+    await refreshAll()
+  } catch (error) {
+    showToast(`导入失败：${error.message ?? String(error)}`, true)
+    setProgress(0, '导入失败', String(error.message ?? error))
+  } finally {
+    state.running = false
+    $('run-import').disabled = true
+  }
+}
+
+function setProgress(percent, label, detail) {
+  $('progress-fill').style.width = `${Math.max(0, Math.min(100, percent))}%`
+  $('progress-label').textContent = label
+  $('progress-detail').textContent = detail
+}
+
+function renderDone(results, skippedImported = 0) {
+  const box = $('done-report')
+  box.hidden = false
+  box.innerHTML = '<p class="section-label">IMPORT COMPLETE</p>'
+  if (skippedImported > 0) {
+    const skipNote = document.createElement('div')
+    skipNote.className = 'done-card'
+    skipNote.innerHTML = `<div class="done-card__head"><strong>已跳过</strong><span class="badge badge--muted">${skippedImported} 个</span></div>
+      <div class="done-card__line">所选会话中已有 ${skippedImported} 个导入过，本次未重复写入（保留 Harness 中可能新增的对话）。</div>`
+    box.appendChild(skipNote)
+  }
+  for (const result of results) {
+    const card = document.createElement('div')
+    card.className = 'done-card'
+    const copyText = result.copy === null
+      ? '<span style="color:#8fa3c8">仅会话（未复制目录）</span>'
+      : result.copy?.error
+        ? `<span style="color:#f09aa6">复制失败：${escapeHtml(result.copy.error)}</span>`
+        : `已复制 ${result.copy?.files ?? 0} 个文件`
+    const workspaceText = result.workspace === null
+      ? '—'
+      : result.workspace.ok
+        ? `工作区已注册${result.workspace.attached > 0 ? `，${result.workspace.attached} 个会话已归组` : ''}`
+        : `<span style="color:#f09aa6">${escapeHtml(result.workspace.error)}</span>`
+    card.innerHTML = `
+      <div class="done-card__head"><strong></strong><span class="badge badge--ok">完成</span></div>
+      <div class="done-card__line"><b>项目：</b><span></span></div>
+      <div class="done-card__line"><b>会话：</b><span></span></div>
+      <div class="done-card__line"><b>工作区：</b><span></span></div>`
+    card.querySelector('strong').textContent = result.name
+    card.querySelectorAll('.done-card__line span')[0].textContent = copyText
+    card.querySelectorAll('.done-card__line span')[1].textContent =
+      `${result.written.length} 个写入，${result.skipped.length} 个跳过`
+    card.querySelectorAll('.done-card__line span')[2].textContent = workspaceText
+    box.appendChild(card)
+  }
+  const hint = document.createElement('div')
+  hint.className = 'done-card'
+  hint.innerHTML = `<div class="done-card__head"><strong>下一步</strong></div>
+    <div class="done-card__line">在主窗口刷新页面后，侧边栏会话列表与工作区将出现导入的会话。打开会话即可浏览迁移的历史对话。</div>`
+  box.appendChild(hint)
+
+  const closeCard = document.createElement('div')
+  closeCard.className = 'done-card'
+  closeCard.innerHTML = `<button class="button button--primary button--wide" id="close-tools" type="button">关闭工具区，回到主界面</button>`
+  box.appendChild(closeCard)
+  $('progress-box').hidden = true
+  setProgress(100, '导入完成', '')
+  $('close-tools').addEventListener('click', () => api.windowAction('close'))
+}
+
+// ---------- tool switching ----------
+
+function switchTool(name) {
+  state.activeTool = name
+  for (const item of document.querySelectorAll('.tool-rail__item')) {
+    item.classList.toggle('is-active', item.dataset.tool === name)
+  }
+  for (const stage of document.querySelectorAll('.tool-stage')) {
+    stage.hidden = stage.id !== name
+  }
+  if (name === 'update-check') {
+    void api.updateInfo().then((info) => {
+      renderUpdateInfo(info)
+      // First open of the panel triggers one automatic baseline check.
+      if (!updateState.checked) return runUpdateCheck()
+    }).catch(() => {})
+  }
+}
+
+// ---------- update check panel ----------
+
+function setUpdateStatus(kind, text) {
+  const box = $('update-status')
+  box.className = `update-status update-status--${kind}`
+  box.textContent = text
+}
+
+function setUpdateProgress(percent, label, detail) {
+  $('update-progress-fill').style.width = `${Math.max(0, Math.min(100, percent))}%`
+  $('update-progress-label').textContent = label
+  $('update-progress-detail').textContent = detail
+}
+
+function latestMeta(latest) {
+  const parts = [latest.sourceLabel]
+  if (latest.releaseDate) parts.push(formatDate(latest.releaseDate))
+  if (latest.size) parts.push(formatBytes(latest.size))
+  return parts.join(' · ')
+}
+
+function renderUpdateInfo(info) {
+  updateState.info = info
+  $('update-current-version').textContent = `v${info.current}`
+  $('update-current-meta').textContent = info.installed
+    ? `已安装 · ${info.installDir ?? ''}`
+    : '开发模式（未打包运行）'
+
+  const kernelBundled = info.kernel?.bundled ?? null
+  $('update-kernel-version').textContent = kernelBundled ?? '—'
+  if (info.kernel?.latest) {
+    $('update-kernel-meta').textContent = kernelBundled === info.kernel.latest
+      ? '与 npm 最新一致'
+      : `官方 npm 最新 ${info.kernel.latest}`
+  } else if (kernelBundled === null) {
+    $('update-kernel-meta').textContent = '未检测到内核'
+  } else {
+    $('update-kernel-meta').textContent = 'npm 信息不可用'
+  }
+
+  const latest = info.latest
+  if (latest === null && info.checkedAt === null && (info.error ?? null) === null) {
+    $('update-latest-version').textContent = '—'
+    $('update-latest-meta').textContent = '尚未检查'
+    setUpdateStatus('checking', '打开面板后会自动检查，也可以点击「检查更新」。')
+  } else if (info.error && latest === null) {
+    $('update-latest-version').textContent = '—'
+    $('update-latest-meta').textContent = '检查失败'
+    setUpdateStatus('error', `检查更新失败：${info.error}`)
+  } else if (latest === null) {
+    $('update-latest-version').textContent = '暂无'
+    $('update-latest-meta').textContent = '官方仓库尚未发布基线'
+    setUpdateStatus('warn', `官方仓库（${info.repo}）还没有可用的版本基线。构建产物推送到仓库后即可在此一键更新。`)
+  } else if (info.updateAvailable !== true) {
+    $('update-latest-version').textContent = `v${latest.version}`
+    $('update-latest-meta').textContent = latestMeta(latest)
+    setUpdateStatus('ok', `已是最新版本：当前 v${info.current}，与官方基线 v${latest.version} 一致。`)
+  } else {
+    $('update-latest-version').textContent = `v${latest.version}`
+    $('update-latest-meta').textContent = latestMeta(latest)
+    setUpdateStatus('available', `发现新版本 v${latest.version}（当前 v${info.current}）。`)
+  }
+
+  const downloaded = info.downloaded
+  if (info.downloading === true) {
+    $('update-progress-box').hidden = false
+    $('update-now').hidden = true
+    $('update-apply').hidden = true
+    $('update-cancel').hidden = false
+  } else if (downloaded?.ready === true) {
+    $('update-progress-box').hidden = false
+    setUpdateProgress(100, '更新包已就绪',
+      `已下载 ${formatBytes(downloaded.size)}${
+        downloaded.sha512Ok === true ? ' · sha512 校验通过'
+          : downloaded.sha512Ok === null ? ' · 官方基线未提供 sha512（未校验）' : ''}`)
+    $('update-now').hidden = true
+    $('update-apply').hidden = !info.installed
+    $('update-cancel').hidden = true
+    setUpdateStatus('available', info.installed
+      ? '更新包已就绪，点击「重启并更新」完成更新。'
+      : '更新包已就绪。开发模式无法自动更新，请使用安装版。')
+  } else {
+    $('update-progress-box').hidden = true
+    $('update-cancel').hidden = true
+    $('update-apply').hidden = true
+    $('update-now').hidden = info.updateAvailable !== true || info.downloading === true
+    if (info.downloadError) setUpdateStatus('error', `下载失败：${info.downloadError}`)
+  }
+
+  document.querySelector('.tool-rail__item[data-tool="update-check"]')
+    ?.classList.toggle('has-update', info.updateAvailable === true)
+}
+
+async function runUpdateCheck() {
+  if (updateState.checking) return
+  updateState.checking = true
+  updateState.checked = true
+  setUpdateStatus('checking', '正在对照官方仓库基线…')
+  $('update-check-now').disabled = true
+  try {
+    const info = await api.updateCheck()
+    renderUpdateInfo(info)
+  } catch (error) {
+    setUpdateStatus('error', `检查更新失败：${error.message ?? String(error)}`)
+  } finally {
+    updateState.checking = false
+    $('update-check-now').disabled = false
+  }
+}
+
+async function startDownload() {
+  if (updateState.downloading) return
+  updateState.downloading = true
+  setUpdateStatus('checking', '开始下载官方更新包…')
+  $('update-progress-box').hidden = false
+  setUpdateProgress(0, '正在下载…', '')
+  try {
+    const info = await api.updateDownload()
+    updateState.downloading = false
+    renderUpdateInfo(info)
+    if (info.downloadError) showToast(`下载失败：${info.downloadError}`, true)
+  } catch (error) {
+    updateState.downloading = false
+    showToast(`下载失败：${error.message ?? String(error)}`, true)
+    try { renderUpdateInfo(await api.updateInfo()) } catch { /* keep current view */ }
+  }
+}
+
+async function cancelDownload() {
+  try {
+    const info = await api.updateCancel()
+    renderUpdateInfo(info)
+    showToast('已取消下载')
+  } catch { /* cancel is best-effort */ }
+}
+
+async function applyUpdateNow() {
+  if (updateState.info?.downloaded?.ready !== true) return
+  setUpdateStatus('checking', '正在启动更新程序并退出当前应用…（如弹出 UAC 授权窗口，请选择「是」）')
+  try {
+    await api.updateApply()
+  } catch (error) {
+    showToast(`启动更新失败：${error.message ?? String(error)}`, true)
+    try { renderUpdateInfo(await api.updateInfo()) } catch { /* keep current view */ }
+  }
+}
+
+// ---------- wiring ----------
+
+function wireChrome() {
+  for (const button of document.querySelectorAll('.tools-chrome__button')) {
+    button.addEventListener('click', () => api.windowAction(button.dataset.action))
+  }
+}
+
+function wireRail() {
+  for (const item of document.querySelectorAll('.tool-rail__item:not(:disabled)')) {
+    item.addEventListener('click', () => switchTool(item.dataset.tool))
+  }
+}
+
+function wireUpdatePanel() {
+  $('update-check-now').addEventListener('click', () => { void runUpdateCheck() })
+  $('update-now').addEventListener('click', () => { void startDownload() })
+  $('update-apply').addEventListener('click', () => { void applyUpdateNow() })
+  $('update-cancel').addEventListener('click', () => { void cancelDownload() })
+  $('update-open-repo').addEventListener('click', () => { void api.updateOpenRepo() })
+  api.onUpdateProgress((progress) => {
+    if (progress.phase === 'download') {
+      const percent = typeof progress.percent === 'number' && progress.percent >= 0 ? progress.percent : 0
+      setUpdateProgress(percent, '正在下载官方更新包…',
+        `${formatBytes(progress.received)} / ${formatBytes(progress.total)}`)
+    } else if (progress.phase === 'verify') {
+      setUpdateProgress(100, '正在校验下载文件…',
+        progress.sha512Ok === false ? 'sha512 校验失败'
+          : progress.sha512Ok === true ? 'sha512 校验通过'
+            : '官方基线未提供 sha512，跳过校验')
+    }
+  })
+}
+
+function wire() {
+  wireChrome()
+  wireRail()
+  wireUpdatePanel()
+  $('refresh-scan').addEventListener('click', refreshAll)
+  $('choose-sessions-dir').addEventListener('click', async () => {
+    const config = await api.chooseSessionsRoot()
+    if (config === null) return
+    renderConfig(config)
+    showToast('会话目录已更新')
+    await refreshAll()
+  })
+  $('reset-sessions-dir').addEventListener('click', async () => {
+    const config = await api.resetSessionsRoot()
+    renderConfig(config)
+    showToast('已恢复默认会话目录')
+    await refreshAll()
+  })
+  $('choose-target').addEventListener('click', async () => {
+    const config = await api.chooseTarget()
+    if (config === null) return
+    renderConfig(config)
+  })
+  $('run-import').addEventListener('click', runImport)
+  $('search-input').addEventListener('input', (event) => {
+    state.search = event.target.value
+    renderProjects()
+  })
+  $('sort-select').addEventListener('change', (event) => {
+    state.sort = event.target.value
+    renderProjects()
+  })
+  $('select-all').addEventListener('click', () => setAllChecked(true))
+  $('select-none').addEventListener('click', () => setAllChecked(false))
+  $('expand-all').addEventListener('click', () => setAllExpanded(true))
+  $('collapse-all').addEventListener('click', () => setAllExpanded(false))
+  api.onImportProgress((progress) => {
+    if (progress.kind === 'copy-progress') {
+      setProgress(
+        progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0,
+        `正在复制 ${progress.name}…`,
+        progress.file ? `${progress.done}/${progress.total} · ${progress.file}` : '准备中…',
+      )
+    } else if (progress.kind === 'copy-done') {
+      setProgress(100, `已复制 ${progress.project}`, `共 ${progress.files} 个文件`)
+    } else if (progress.kind === 'session-progress') {
+      setProgress(
+        100,
+        `正在写入会话 ${progress.project}…`,
+        progress.phase === 'written' ? `已写入 ${progress.logPath}` : '',
+      )
+    }
+  })
+  void refreshAll()
+  switchTool('codex-import')
+}
+
+document.addEventListener('DOMContentLoaded', wire)

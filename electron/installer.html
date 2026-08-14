@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DSH Desktop 安装</title>
+    <style>
+      :root { color-scheme: dark; --brand: #4d6bfe; --aqua: #8ddcff; --deep: #08152d; --panel: #0c1f42cc; }
+      * { box-sizing: border-box; }
+      body { margin: 0; height: 100vh; overflow: hidden; color: #f2f6ff; font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: #08152d; user-select: none; }
+      .ocean { position: relative; width: 100%; height: 100%; overflow: hidden; border: 1px solid rgba(126,193,255,.28); border-radius: 18px; background: radial-gradient(ellipse 70% 90% at 50% 42%, rgba(76,107,254,.35), transparent 68%), linear-gradient(150deg, #10275a, var(--deep) 72%); box-shadow: inset 0 0 64px rgba(119,198,255,.08); }
+      .titlebar { position: absolute; top: 0; left: 0; right: 0; height: 46px; z-index: 20; display: flex; align-items: center; gap: 9px; padding: 0 8px 0 16px; -webkit-app-region: drag; }
+      .titlebar img { width: 24px; height: 24px; }
+      .titlebar .t { font-weight: 650; font-size: 13px; letter-spacing: .02em; }
+      .titlebar .v { color: #a8c5f0; font-size: 11px; margin-left: 6px; }
+      .titlebar .spacer { flex: 1; }
+      .titlebar button { width: 44px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: #cfe2ff; font-size: 15px; cursor: pointer; -webkit-app-region: no-drag; }
+      .titlebar button:hover { background: rgba(255,255,255,.12); }
+      .titlebar button.close:hover { background: #d94b5b; color: #fff; }
+      .view { position: absolute; inset: 46px 0 0; z-index: 10; display: none; flex-direction: column; padding: 34px 38px 26px; }
+      .view.active { display: flex; }
+      .steps { display: flex; gap: 8px; margin-bottom: 22px; }
+      .steps .dot { width: 22px; height: 4px; border-radius: 2px; background: rgba(143,186,255,.25); }
+      .steps .dot.on { background: var(--brand); }
+      .big { width: 88px; height: 88px; object-fit: contain; filter: drop-shadow(0 12px 18px rgba(7,29,88,.5)); }
+      h1 { margin: 18px 0 8px; font-size: 24px; letter-spacing: -.01em; }
+      p { margin: 0; color: #b1ceef; font-size: 13px; line-height: 1.7; }
+      .foot { margin-top: auto; display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
+      button.primary { padding: 10px 26px; border: 0; border-radius: 10px; background: linear-gradient(180deg, #5f7cff, #4260ef); color: #fff; font: 600 14px inherit; cursor: pointer; box-shadow: 0 6px 18px rgba(66,96,239,.4); }
+      button.primary:disabled { opacity: .45; cursor: default; }
+      button.ghost { padding: 10px 20px; border: 1px solid rgba(143,186,255,.3); border-radius: 10px; background: transparent; color: #cfe2ff; font: 500 13px inherit; cursor: pointer; }
+      .path-row { display: flex; gap: 10px; margin-top: 16px; align-items: center; }
+      .path-row input { flex: 1; padding: 11px 14px; border: 1px solid rgba(143,186,255,.35); border-radius: 10px; background: rgba(4,14,34,.72); color: #f2f6ff; font: 13px inherit; outline: none; }
+      .path-row input:focus { border-color: var(--brand); }
+      .progress-wrap { margin-top: 18px; }
+      .progress-head { display: flex; justify-content: space-between; margin-bottom: 8px; color: #b1ceef; font-size: 12px; }
+      .progress-head b { color: #f2f6ff; font-size: 15px; }
+      .bar { height: 12px; border-radius: 6px; background: rgba(4,14,34,.72); overflow: hidden; border: 1px solid rgba(143,186,255,.25); }
+      .bar i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #5f7cff, #4d6bfe); border-radius: 6px; transition: width .18s ease; }
+      .status { margin-top: 14px; color: #a8c5f0; font-size: 12.5px; min-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .logs { user-select: text; margin-top: 12px; flex: 1; min-height: 120px; overflow: auto; padding: 10px 12px; border-radius: 10px; background: rgba(3,12,30,.6); border: 1px solid rgba(143,186,255,.18); font: 11px/1.55 Consolas, monospace; color: #b9d4f5; white-space: pre-wrap; }
+      .done-ico { width: 76px; height: 76px; border-radius: 50%; display: grid; place-items: center; font-size: 40px; color: #fff; background: linear-gradient(180deg, #34d399, #10b981); box-shadow: 0 10px 26px rgba(16,185,129,.35); }
+      .check-row { margin-top: 18px; display: flex; align-items: center; gap: 10px; color: #dbe9ff; font-size: 13.5px; }
+      .check-row input { width: 16px; height: 16px; accent-color: var(--brand); }
+      .hint { margin-top: 10px; font-size: 12px; color: #7d97c4; }
+    </style>
+  </head>
+  <body>
+    <main class="ocean">
+      <div class="titlebar">
+        <img src="../website/assets/favicon.svg" alt="" />
+        <span class="t">DSH Desktop</span><span class="v" id="ver"></span>
+        <span class="spacer"></span>
+        <button class="close" data-act="close" title="关闭">&#10005;</button>
+      </div>
+
+      <section class="view active" id="view-welcome">
+        <div class="steps"><i class="dot on"></i><i class="dot"></i><i class="dot"></i><i class="dot"></i></div>
+        <img class="big" src="../website/assets/favicon.svg" alt="" />
+        <h1 data-i18n="welcomeTitle">安装 DSH Desktop</h1>
+        <p data-i18n="welcomeBody">本地运行的 DeepSeek Harness 智能体环境。<br/>安装完成后即可直接使用，全程离线。</p>
+        <p class="hint" data-i18n="welcomeHint">将安装到：<b id="welcomePath" style="color:#dbe9ff"></b></p>
+        <div class="foot"><button class="primary" id="btnWelcomeNext" data-i18n="next">下一步</button></div>
+      </section>
+
+      <section class="view" id="view-dir">
+        <div class="steps"><i class="dot on"></i><i class="dot on"></i><i class="dot"></i><i class="dot"></i></div>
+        <h1 style="margin-top:34px" data-i18n="dirTitle">选择安装目录</h1>
+        <p data-i18n="dirBody">应用与运行时将安装到所选目录。</p>
+        <div class="path-row">
+          <input id="dirInput" type="text" spellcheck="false" />
+          <button class="ghost" id="btnBrowse" data-i18n="browse">浏览…</button>
+        </div>
+        <div class="foot">
+          <button class="ghost" id="btnDirBack" data-i18n="back">上一步</button>
+          <button class="primary" id="btnDirNext" data-i18n="install">安装</button>
+        </div>
+      </section>
+
+      <section class="view" id="view-install">
+        <div class="steps"><i class="dot on"></i><i class="dot on"></i><i class="dot on"></i><i class="dot"></i></div>
+        <h1 style="margin-top:10px" data-i18n="installTitle">正在安装</h1>
+        <div class="progress-wrap">
+          <div class="progress-head"><span id="pctLabel">0%</span><b id="countLabel">0 个文件</b></div>
+          <div class="bar"><i id="barFill"></i></div>
+          <div class="status" id="statusLabel" data-i18n="installReady">准备安装…</div>
+        </div>
+        <div class="logs" id="logBox"></div>
+      </section>
+
+      <section class="view" id="view-done">
+        <div class="steps"><i class="dot on"></i><i class="dot on"></i><i class="dot on"></i><i class="dot on"></i></div>
+        <div class="done-ico">&#10003;</div>
+        <h1 data-i18n="doneTitle">安装完成</h1>
+        <p data-i18n="doneBody">DSH Desktop 已就绪。</p>
+        <div class="check-row"><input type="checkbox" id="launchCheck" checked /><label for="launchCheck" data-i18n="launch">安装完成后启动 DSH Desktop</label></div>
+        <div class="foot"><button class="primary" id="btnFinish" data-i18n="finish">完成</button></div>
+      </section>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id)
+      const i18n = navigator.language.toLowerCase().startsWith('en')
+        ? { welcomeTitle: 'Install DSH Desktop', welcomeBody: 'Run the DeepSeek Harness agent environment locally.<br/>Fully offline after installation.', welcomeHint: 'Install to: ', next: 'Next', dirTitle: 'Choose installation directory', dirBody: 'The app and its runtime will be installed here.', browse: 'Browse…', back: 'Back', install: 'Install', installTitle: 'Installing', installReady: 'Getting ready…', doneTitle: 'Installation complete', doneBody: 'DSH Desktop is ready.', launch: 'Launch DSH Desktop after install', finish: 'Finish' }
+        : {}
+      const t = (key) => i18n[key] || document.querySelector('[data-i18n="' + key + '"]')?.textContent || key
+      const show = (id) => { document.querySelectorAll('.view').forEach(v => v.classList.remove('active')); $(id).classList.add('active') }
+      let target = ''
+      let defaultsLoaded = false
+
+      window.dshDesktop.installerDefaults().then((d) => {
+        target = d.target
+        $('welcomePath').textContent = target
+        $('dirInput').value = target
+        $('ver').textContent = 'v' + d.version
+        defaultsLoaded = true
+      })
+
+      $('btnWelcomeNext').addEventListener('click', () => show('view-dir'))
+      $('btnDirBack').addEventListener('click', () => show('view-welcome'))
+      $('btnBrowse').addEventListener('click', async () => {
+        const picked = await window.dshDesktop.installerChooseDir()
+        if (picked) { target = picked; $('dirInput').value = picked; $('welcomePath').textContent = picked }
+      })
+      $('dirInput').addEventListener('input', () => { target = $('dirInput').value.trim(); $('welcomePath').textContent = target || '—' })
+
+      let installTimer = null
+      $('btnDirNext').addEventListener('click', async () => {
+        if (!target) return
+        show('view-install')
+        $('barFill').style.width = '0%'
+        $('pctLabel').textContent = '0%'
+        $('statusLabel').textContent = t('installReady')
+        $('logBox').textContent = ''
+        await window.dshDesktop.installerStart(target)
+        window._workerAt = Date.now()
+        installTimer = setInterval(poll, 250)
+      })
+
+      async function poll() {
+        const s = await window.dshDesktop.installerLogTail()
+        if (s.tail.length) {
+          $('logBox').textContent = s.tail.slice(-60).join('\n')
+          $('logBox').scrollTop = $('logBox').scrollHeight
+          const last = s.tail[s.tail.length - 1]
+          // The tail is mostly per-file lines; the newest progress line may be
+          // many entries above the end. Scan backwards so the percentage and
+          // file count keep advancing instead of freezing on a stale value.
+          let progress = null
+          for (let i = s.tail.length - 1; i >= 0; i -= 1) {
+            const m = /\| progress \| (\d+)% \((\d+) files\)/.exec(s.tail[i])
+            if (m) { progress = m; break }
+          }
+          if (progress) {
+            $('pctLabel').textContent = progress[1] + '%'
+            $('barFill').style.width = progress[1] + '%'
+            $('countLabel').textContent = progress[2] + ' 个文件'
+          }
+          const fm = /\| file \| ([^\n]+)$/.exec(last)
+          if (fm) $('statusLabel').textContent = fm[1]
+        }
+        if (s.complete) { finishInstall(); return }
+        if (s.failed) { clearInterval(installTimer); $('statusLabel').textContent = '安装失败，请查看日志'; return }
+        if (s.waiting) {
+          const waited = Date.now() - (window._workerAt || Date.now())
+          $('statusLabel').textContent = waited > 60000
+            ? '安装进程未启动或提权未确认。请关闭窗口重新运行安装器再试。'
+            : waited > 12000
+              ? '等待提权确认…（如未出现弹窗请重试）'
+              : $('statusLabel').textContent
+        }
+      }
+      async function finishInstall() {
+        clearInterval(installTimer)
+        $('pctLabel').textContent = '100%'
+        $('barFill').style.width = '100%'
+        $('statusLabel').textContent = '完成'
+        show('view-done')
+      }
+      $('btnFinish').addEventListener('click', () => {
+        window.dshDesktop.installerFinish($('launchCheck').checked)
+      })
+      document.querySelector('[data-act="close"]').addEventListener('click', () => window.dshDesktop.installerCancel())
+    </script>
+  </body>
+</html>

@@ -1,0 +1,71 @@
+{
+  "name": "dsh-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron desktop shell for DeepSeek Harness.",
+  "main": "electron/main.mjs",
+  "type": "module",
+  "packageManager": "pnpm@10.24.0",
+  "scripts": {
+    "postinstall": "node scripts/ensure-electron.mjs",
+    "generate:icon": "node scripts/generate-icon.mjs",
+    "generate:splash": "node scripts/generate-splash.mjs",
+    "patch:portable": "node scripts/patch-portable-template.mjs",
+    "dev": "electron .",
+    "start": "electron .",
+    "bootstrap:harness": "corepack pnpm install --dir deepseek-harness && corepack pnpm --dir deepseek-harness run build",
+    "prepare:runtime": "node scripts/prepare-runtime.mjs",
+    "dist:win": "pnpm generate:icon && pnpm generate:splash && pnpm patch:portable && pnpm prepare:runtime && electron-builder --win portable --x64 && node scripts/set-icon.cjs && node scripts/write-latest-yml.mjs"
+  },
+  "devDependencies": {
+    "electron": "^37.3.1",
+    "electron-builder": "^26.0.12",
+    "rcedit": "^5.0.2"
+  },
+  "build": {
+    "appId": "com.oykb58246.dsh-desktop",
+    "productName": "DSH Desktop",
+    "asar": true,
+    "icon": "assets/icon.ico",
+    "directories": {
+      "output": "website/download",
+      "buildResources": "assets"
+    },
+    "extraResources": [
+      {
+        "from": "output",
+        "filter": [
+          "dsh-runtime/**"
+        ]
+      }
+    ],
+    "files": [
+      "electron/**",
+      "assets/**",
+      "website/assets/favicon.svg",
+      "package.json"
+    ],
+    "win": {
+      "signExecutable": false,
+      "electronLanguages": [
+        "en-US",
+        "zh-CN"
+      ],
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "portable": {
+      "artifactName": "dsh-desktop-setup-x64.${ext}",
+      "splashImage": "assets/installer-splash.jpg",
+      "useZip": true,
+      "unpackDirName": "dsh-desktop-installer"
+    }
+  }
+}

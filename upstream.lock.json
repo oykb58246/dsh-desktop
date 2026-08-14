@@ -1,0 +1,9 @@
+{
+  "$comment": "Single source of truth for the kernel bundled into the installer. The kernel is fetched from the npm registry at build time and verified against this pin; end users never touch npm.",
+  "kernel": {
+    "name": "@deepseek-ai/dsh",
+    "version": "0.1.0-rc.6",
+    "integrity": "sha512-brpZfED7ieRa2PQ5tUxMhHrM1pb2CmKFVM/f6yMULBDMicahk+Z2OsHgTwTDnoiZm23Ftu9rQz0NN4pflaoJcg==",
+    "bin": "node_modules/@deepseek-ai/dsh/lib/bin.js"
+  }
+}

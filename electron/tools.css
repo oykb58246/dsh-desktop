@@ -1,0 +1,1316 @@
+/* DSH Desktop tools workbench — dark theme matching the injected chrome. */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font: 14px/1.55 "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: #e8eefb;
+  background: #0f1520;
+  display: flex;
+  flex-direction: column;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ---------- title chrome ---------- */
+
+.tools-chrome {
+  flex: 0 0 42px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 0 0 14px;
+  background: #171d2a;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.tools-chrome__icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.tools-chrome__title {
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+}
+
+.tools-chrome__actions {
+  margin-left: auto;
+  display: flex;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.tools-chrome__button {
+  position: relative;
+  width: 46px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.86;
+}
+
+.tools-chrome__button::before,
+.tools-chrome__button::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 1.5px;
+  background: currentColor;
+  transform: translate(-50%, -50%);
+}
+
+.tools-chrome__button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 1;
+}
+
+.tools-chrome__button--close:hover {
+  background: #d94b5b;
+}
+
+/* The minimize button draws only its bar; maximize draws a square; close a cross. */
+.tools-chrome__button::after {
+  display: none;
+}
+
+.tools-chrome__button[data-action="maximize"]::before {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  background: transparent;
+}
+
+.tools-chrome__button[data-action="maximize"]::after {
+  display: block;
+  width: 0;
+  height: 0;
+  background: none;
+}
+
+.tools-chrome__button[data-action="close"]::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.tools-chrome__button[data-action="close"]::after {
+  display: block;
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+/* ---------- workbench layout ---------- */
+
+.workbench {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.tool-rail {
+  flex: 0 0 212px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 10px;
+  background: #121926;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  overflow-y: auto;
+}
+
+.tool-rail__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #b9c4d8;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-rail__item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #e8eefb;
+}
+
+.tool-rail__item.is-active {
+  background: rgba(80, 140, 255, 0.16);
+  color: #eef3ff;
+}
+
+.tool-rail__item.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tool-rail__icon {
+  flex: 0 0 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 15px;
+}
+
+.tool-rail__copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tool-rail__copy strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tool-rail__copy small {
+  font-size: 11px;
+  opacity: 0.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The stage is a fixed viewport: heading/config/stats/toolbar stay put, the
+   project list scrolls inside its own box, and the import bar is always
+   visible below it — no page-level scrolling to reach the one-shot button. */
+.tool-stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 22px 26px 18px;
+}
+
+.tool-stage .project-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  margin-bottom: 4px;
+}
+
+/* ---------- stage heading & steps ---------- */
+
+.stage-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.eyebrow,
+.section-label {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: #6f8fc7;
+  font-weight: 600;
+}
+
+.stage-heading h1 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.stage-heading__badge {
+  flex: 0 0 auto;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: rgba(80, 140, 255, 0.14);
+  color: #9dbdf5;
+}
+
+.step-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #131b2a;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.step-strip__step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #67748c;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.step-strip__step span {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.step-strip__step.is-active {
+  color: #eef3ff;
+}
+
+.step-strip__step.is-active span {
+  background: #4c8dff;
+  color: #fff;
+}
+
+.step-strip__step.is-done {
+  color: #7fd1a8;
+}
+
+.step-strip__step.is-done span {
+  background: rgba(127, 209, 168, 0.18);
+}
+
+.step-strip__line {
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ---------- panels ---------- */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border-radius: 12px;
+  background: #141c2c;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.panel__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel__heading--sub {
+  margin-top: 8px;
+}
+
+.panel__heading--center {
+  justify-content: center;
+  text-align: center;
+}
+
+.panel__heading h2 {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.panel__lede {
+  color: #9aa7bf;
+  font-size: 13px;
+}
+
+.panel__lede code {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 12px;
+}
+
+.panel__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* ---------- controls ---------- */
+
+.button {
+  padding: 8px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: transparent;
+  color: #dbe5f5;
+  font: 600 13px "Segoe UI", "Microsoft YaHei", sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.button:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.button--primary {
+  background: #2f6fe0;
+  border-color: transparent;
+  color: #fff;
+}
+
+.button--primary:hover {
+  background: #3d7df0;
+}
+
+.button--primary:disabled,
+.button--secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.directory-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 9px;
+  background: #0f1726;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  min-width: 0;
+}
+
+.directory-line__path {
+  font: 600 13px "Cascadia Code", "Consolas", monospace;
+  color: #cfe0ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-line__hint {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: #7e8aa3;
+}
+
+.selection-count {
+  font-size: 13px;
+  color: #9aa7bf;
+}
+
+.selection-count b {
+  color: #eef3ff;
+  font-size: 15px;
+}
+
+/* ---------- project list ---------- */
+
+/* The cockpit-style project list scrolls with the whole stage (tool-stage
+   owns overflow-y), never squeezes its rows into a fixed-height flex column. */
+.project-list {
+  display: block;
+}
+
+.empty-note {
+  padding: 22px;
+  text-align: center;
+  color: #6c7891;
+  font-size: 13px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+}
+
+.project-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: #101826;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+}
+
+.project-item:hover {
+  border-color: rgba(80, 140, 255, 0.45);
+}
+
+.project-item.is-selected {
+  border-color: rgba(80, 140, 255, 0.65);
+  background: rgba(80, 140, 255, 0.09);
+}
+
+.project-item input {
+  accent-color: #4c8dff;
+  width: 16px;
+  height: 16px;
+}
+
+.project-item__copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.project-item__copy strong {
+  font-size: 13.5px;
+}
+
+.project-item__copy small {
+  font-size: 12px;
+  color: #7e8aa3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-item__meta {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  font-size: 11.5px;
+  color: #9aa7bf;
+}
+
+.badge {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 11.5px;
+}
+
+.badge--warn {
+  background: rgba(240, 173, 78, 0.18);
+  color: #f0c98a;
+}
+
+.badge--ok {
+  background: rgba(127, 209, 168, 0.16);
+  color: #8fd9b4;
+}
+
+.badge--danger {
+  background: rgba(217, 75, 91, 0.2);
+  color: #f09aa6;
+}
+
+/* ---------- sessions directory block ---------- */
+
+.sessions-dir-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 10px;
+  background: #101826;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sessions-dir-block__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sessions-dir-block__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cfe0ff;
+}
+
+.sessions-dir-block__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sessions-dir-block__actions .button {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+/* ---------- session groups ---------- */
+
+.session-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.session-group {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: #101826;
+  overflow: hidden;
+}
+
+.session-group__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.session-group__head strong {
+  font-size: 13.5px;
+}
+
+.session-group__head .badge {
+  margin-left: auto;
+}
+
+.session-group__body {
+  padding: 8px 10px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.session-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.session-item input {
+  accent-color: #4c8dff;
+}
+
+.session-item__copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.session-item__copy strong {
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item__copy small {
+  font-size: 11.5px;
+  color: #7e8aa3;
+}
+
+.session-loading {
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: #7e8aa3;
+}
+
+/* ---------- precheck ---------- */
+
+.precheck-report {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.precheck-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: #101826;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 13px;
+}
+
+.precheck-row__name {
+  font-weight: 600;
+}
+
+.precheck-row__detail {
+  margin-left: auto;
+  color: #9aa7bf;
+  font-size: 12px;
+}
+
+.import-summary {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.import-summary__cell {
+  flex: 1;
+  min-width: 150px;
+  padding: 12px;
+  border-radius: 9px;
+  background: #101826;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.import-summary__cell span {
+  font-size: 11.5px;
+  color: #7e8aa3;
+}
+
+.import-summary__cell strong {
+  font-size: 18px;
+}
+
+/* ---------- progress ---------- */
+
+.progress-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 10px;
+  background: #101826;
+  border: 1px solid rgba(80, 140, 255, 0.35);
+}
+
+.progress-box__label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2f6fe0, #6aa2ff);
+  transition: width 0.15s ease;
+}
+
+.progress-box__detail {
+  font-size: 12px;
+  color: #9aa7bf;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- done ---------- */
+
+.done-mark {
+  width: 56px;
+  height: 56px;
+  margin: 6px auto 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(127, 209, 168, 0.16);
+  color: #8fd9b4;
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.done-report {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.done-card {
+  padding: 12px 14px;
+  border-radius: 9px;
+  background: #101826;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.done-card__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.done-card__head strong {
+  font-size: 13.5px;
+}
+
+.done-card__line {
+  font-size: 12.5px;
+  color: #9aa7bf;
+  display: flex;
+  gap: 8px;
+}
+
+.done-card__line b {
+  color: #e8eefb;
+  font-weight: 600;
+}
+
+.done-card__line code {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 11.5px;
+  color: #cfe0ff;
+  word-break: break-all;
+}
+
+/* ---------- toast ---------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%) translateY(20px);
+  padding: 10px 18px;
+  border-radius: 10px;
+  background: #1d2739;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  max-width: 70%;
+  text-align: center;
+}
+
+.toast.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.toast--error {
+  border-color: rgba(217, 75, 91, 0.5);
+}
+
+/* ---------- cockpit-style import page ---------- */
+
+.config-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.config-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: #131b2a;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  min-width: 0;
+}
+
+.config-item__label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8fa3c8;
+}
+
+.config-item__path {
+  flex: 1;
+  min-width: 0;
+  font: 600 12.5px "Cascadia Code", "Consolas", monospace;
+  color: #cfe0ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.button--mini {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #9aa7bf;
+}
+
+.project-group {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: #101826;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.project-group__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.project-group__check,
+.session-item input {
+  accent-color: #4c8dff;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.project-group__name {
+  font-size: 14px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-group__toggle {
+  flex: 0 0 auto;
+}
+
+.project-group__path {
+  padding: 0 14px 8px;
+  font: 11.5px "Cascadia Code", "Consolas", monospace;
+  color: #7e8aa3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-group__sessions {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 6px 10px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.import-action {
+  display: flex;
+  justify-content: flex-end;
+  margin: 14px 0;
+}
+
+.button--wide {
+  padding: 10px 26px;
+  font-size: 14px;
+}
+
+.text-button {
+  border: 0;
+  background: transparent;
+  color: #6f8fc7;
+  font: 600 12px "Segoe UI", "Microsoft YaHei", sans-serif;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.text-button:hover {
+  color: #9dbdf5;
+}
+
+/* ---------- stat cards ---------- */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #131b2a;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.stat-card__label {
+  font-size: 11.5px;
+  color: #7e8aa3;
+}
+
+.stat-card strong {
+  font-size: 22px;
+  font-weight: 700;
+  color: #eef3ff;
+}
+
+.stat-card--accent {
+  border-color: rgba(80, 140, 255, 0.4);
+  background: rgba(80, 140, 255, 0.08);
+}
+
+.stat-card--accent strong {
+  color: #9dbdf5;
+}
+
+/* ---------- list toolbar ---------- */
+
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.search-box {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: #101826;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.search-box span {
+  color: #7e8aa3;
+  font-size: 14px;
+}
+
+.search-box input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #e8eefb;
+  font: 13px "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+.search-box input::placeholder {
+  color: #5f6b83;
+}
+
+.sort-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #9aa7bf;
+}
+
+.sort-box select {
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: #101826;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #e8eefb;
+  font: 12.5px "Segoe UI", "Microsoft YaHei", sans-serif;
+  outline: 0;
+}
+
+.list-toolbar__spacer {
+  flex: 1;
+}
+
+/* ---------- project groups (cockpit-style rows) ---------- */
+
+.project-group {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: #101826;
+  margin-bottom: 8px;
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.project-group:hover {
+  border-color: rgba(80, 140, 255, 0.3);
+}
+
+.project-group__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.project-group__check,
+.session-item input {
+  accent-color: #4c8dff;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.project-group__icon {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 16px;
+}
+
+.project-group__names {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  pointer-events: none; /* clicks land on the head, not the names */
+}
+
+.project-group__name {
+  font-size: 14px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-group__path {
+  font: 11.5px "Cascadia Code", "Consolas", monospace;
+  color: #7e8aa3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-group__recent {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: #6c7891;
+}
+
+.project-group__toggle {
+  flex: 0 0 auto;
+}
+
+.project-group__sessions {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 6px 10px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.session-item:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.session-item__icon {
+  flex: 0 0 auto;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.session-item__copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.session-item__copy strong {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item__copy small {
+  font-size: 11px;
+  color: #7e8aa3;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item__time {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: #6c7891;
+  white-space: nowrap;
+}
+
+.session-item.is-imported {
+  opacity: 0.62;
+}
+
+.session-item.is-imported:hover {
+  opacity: 0.95;
+}
+
+.badge--imported {
+  background: rgba(127, 209, 168, 0.16);
+  color: #8fd9b4;
+}
+
+.model-badge {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- import action bar ---------- */
+
+.import-action {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 14px 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #131b2a;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.import-action__summary {
+  font-size: 13px;
+  color: #9aa7bf;
+}
+
+/* ---------- chevron + done scroll ---------- */
+
+.project-group__chevron {
+  flex: 0 0 auto;
+  color: #6f8fc7;
+  font-size: 13px;
+  transition: transform 0.15s ease;
+  width: 14px;
+  text-align: center;
+}
+
+.done-report {
+  flex: 0 0 auto;
+  max-height: 42%;
+  overflow-y: auto;
+}
+
+/* ---------- update check panel ---------- */
+
+.stage-heading__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stat-grid--update {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.stat-card__meta {
+  font-size: 11px;
+  color: #7e8aa3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-status {
+  min-height: 22px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #101826;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #9aa7bf;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.update-status--ok {
+  border-color: rgba(127, 209, 168, 0.45);
+  color: #8fd9b4;
+}
+
+.update-status--warn {
+  border-color: rgba(255, 196, 0, 0.45);
+  color: #e8c66a;
+}
+
+.update-status--error {
+  border-color: rgba(217, 75, 91, 0.55);
+  color: #f09aa6;
+}
+
+.update-status--available,
+.update-status--checking {
+  border-color: rgba(80, 140, 255, 0.4);
+  color: #9dbdf5;
+}
+
+.update-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.update-actions .button--wide {
+  max-width: 420px;
+}
+
+/* Rail badge: a blue dot marks the 检查更新 entry when an update exists. */
+.tool-rail__item.has-update .tool-rail__icon {
+  position: relative;
+}
+
+.tool-rail__item.has-update .tool-rail__icon::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4d8bfd;
+  box-shadow: 0 0 8px rgba(77, 139, 253, 0.95);
+}

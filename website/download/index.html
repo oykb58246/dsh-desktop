@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DSH Desktop 下载</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #111827;
+        --muted: #667085;
+        --line: #e8ebf0;
+        --blue: #4d6bfe;
+        --blue-pale: #eef1ff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--ink);
+        background: #fff;
+        font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      main {
+        width: min(820px, calc(100vw - 40px));
+        margin: 0 auto;
+        padding: 58px 0 72px;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .back {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 70px;
+      }
+
+      .brand img {
+        width: 32px;
+        height: 32px;
+      }
+
+      h1 {
+        margin: 24px 0 12px;
+        font-size: clamp(42px, 8vw, 70px);
+        line-height: 1.02;
+        letter-spacing: -0.05em;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.8;
+      }
+
+      .downloads {
+        display: grid;
+        gap: 12px;
+        margin-top: 48px;
+      }
+
+      .download {
+        display: flex;
+        min-height: 76px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 18px 20px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        transition:
+          border-color 180ms ease,
+          color 180ms ease,
+          transform 180ms ease;
+      }
+
+      .download:hover {
+        color: var(--blue);
+        border-color: #cbd3ff;
+        transform: translateY(-2px);
+      }
+
+      .download strong,
+      .download span {
+        display: block;
+      }
+
+      .download strong {
+        font-size: 15px;
+      }
+
+      .download span {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .empty {
+        margin-top: 18px;
+        padding: 16px 18px;
+        border-radius: 6px;
+        color: #3453e6;
+        background: var(--blue-pale);
+        font-size: 13px;
+      }
+
+      @media (max-width: 520px) {
+        main {
+          padding-top: 32px;
+        }
+
+        .brand {
+          margin-top: 52px;
+        }
+
+        .download {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="back" href="../index.html">← 返回首页</a>
+      <div class="brand">
+        <img src="../assets/favicon.svg" alt="" />
+        <strong>DSH Desktop</strong>
+      </div>
+      <h1>下载<br />安装包。</h1>
+      <p>把生成好的 `.exe` 文件放进这个 download 文件夹，然后在下面添加对应链接。</p>
+
+      <div class="downloads" aria-label="下载列表">
+        <a class="download" href="./dsh-desktop-setup-x64.exe" download>
+          <span>
+            <strong>Windows x64 安装包</strong>
+            <span>dsh-desktop-setup-x64.exe</span>
+          </span>
+          <span>下载 ↓</span>
+        </a>
+        <a class="download" href="./dsh-desktop-portable-x64.exe" download>
+          <span>
+            <strong>Windows x64 便携版</strong>
+            <span>dsh-desktop-portable-x64.exe</span>
+          </span>
+          <span>下载 ↓</span>
+        </a>
+      </div>
+
+      <p class="empty">
+        当前仓库里还没有检测到真实 exe 文件。若文件名不同，把上方 href 改成实际文件名即可。
+      </p>
+    </main>
+  </body>
+</html>

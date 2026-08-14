@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="DSH Desktop：打包官方deepseek harness的一键安装部署应用。"
+    />
+    <meta name="theme-color" content="#ffffff" />
+    <title>DSH Desktop · DeepSeek Harness 一键部署</title>
+    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="shell nav-shell">
+        <a class="brand" href="#top" aria-label="DSH Desktop 首页">
+          <img class="brand-mark" src="./assets/favicon.svg" alt="" />
+          <span class="brand-name">DSH Desktop</span>
+        </a>
+
+        <nav class="main-nav" aria-label="主导航">
+          <a href="#features">能力</a>
+          <a href="#download">下载</a>
+          <a href="#links">资源</a>
+          <a
+            class="nav-github"
+            href="https://github.com/oykb58246/dsh-desktop"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub
+            <span aria-hidden="true">↗</span>
+          </a>
+        </nav>
+
+        <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="main-nav">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span class="sr-only">打开菜单</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero shell">
+        <div class="hero-copy">
+          <p class="eyebrow">
+            <span class="eyebrow-dot" aria-hidden="true"></span>
+            DESKTOP WRAPPER FOR DEEPSEEK HARNESS
+          </p>
+          <h1>把 Harness<br /><span>带到桌面。</span></h1>
+          <p class="hero-lede">
+            DSH Desktop 是一个打包官方deepseek harness的一键安装部署应用。
+            少一点环境折腾，多一点专注构建。
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#download">
+              下载 DSH Desktop
+              <span aria-hidden="true">↓</span>
+            </a>
+            <a class="button button-secondary" href="#features">
+              了解更多
+              <span aria-hidden="true">↓</span>
+            </a>
+          </div>
+          <p class="hero-note">
+            社区封装项目 · 基于官方 DeepSeek Harness · 开源透明
+          </p>
+        </div>
+
+        <div class="hero-visual" aria-label="DSH Desktop 应用预览">
+          <div class="visual-orbit visual-orbit-one"></div>
+          <div class="visual-orbit visual-orbit-two"></div>
+          <div class="visual-window">
+            <div class="window-topbar">
+              <div class="window-brand">
+                <img src="./assets/favicon.svg" alt="" />
+                <span>DSH Desktop</span>
+              </div>
+              <div class="window-controls" aria-hidden="true">
+                <i></i>
+                <i></i>
+                <i></i>
+              </div>
+            </div>
+            <div class="window-body">
+              <div class="window-sidebar">
+                <span class="sidebar-line sidebar-line-active"></span>
+                <span class="sidebar-line"></span>
+                <span class="sidebar-line"></span>
+                <span class="sidebar-line sidebar-line-short"></span>
+              </div>
+              <div class="window-content">
+                <div class="content-kicker">DEEPSEEK HARNESS</div>
+                <div class="content-title">Ready to build.</div>
+                <div class="content-line content-line-long"></div>
+                <div class="content-line content-line-medium"></div>
+                <div class="content-prompt">
+                  <span>›</span>
+                  <span>Start a new workspace</span>
+                  <b>⌘ K</b>
+                </div>
+                <div class="content-terminal">
+                  <span class="terminal-dot"></span>
+                  <span>Local runtime connected</span>
+                  <em>online</em>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="visual-badge">
+            <span class="badge-icon">✓</span>
+            <span>
+              <strong>一键启动</strong>
+              <small>Ready when you are</small>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section class="intro-band">
+        <div class="shell intro-grid">
+          <p class="section-label">01 / 为什么是 DSH</p>
+          <div>
+            <h2>把复杂的部署，<br /><span>收进一个按钮。</span></h2>
+            <p class="section-copy">
+              DSH Desktop 将官方 Harness 的依赖安装、构建和本地 Web 服务启动串成一个顺滑的桌面流程。
+              打开应用，剩下的交给它。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="features shell" id="features">
+        <div class="section-heading">
+          <p class="section-label">02 / 核心能力</p>
+          <p class="section-aside">Built around the official Harness.</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-item">
+            <span class="feature-index">01</span>
+            <div class="feature-icon icon-install" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <h3>一键部署</h3>
+            <p>自动检查依赖、构建 Harness，并准备本地运行环境。</p>
+          </article>
+          <article class="feature-item">
+            <span class="feature-index">02</span>
+            <div class="feature-icon icon-window" aria-hidden="true">
+              <span></span><span></span>
+            </div>
+            <h3>原生桌面体验</h3>
+            <p>把 Web 应用装进 Electron 窗口，独立、专注、随时可用。</p>
+          </article>
+          <article class="feature-item">
+            <span class="feature-index">03</span>
+            <div class="feature-icon icon-open" aria-hidden="true">
+              <span></span><span></span>
+            </div>
+            <h3>开源透明</h3>
+            <p>基于官方仓库构建，代码、依赖和产品边界都清清楚楚。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="download-band" id="download">
+        <div class="shell">
+          <div class="download-heading">
+            <div>
+              <p class="section-label">03 / 开始使用</p>
+              <h2>选择你的<br /><span>工作台。</span></h2>
+            </div>
+            <p class="download-copy">
+              安装包放在本站同级的 download 文件夹内。点击下载后进入本地安装包列表。
+            </p>
+          </div>
+
+          <div class="download-grid">
+            <article class="download-card download-card-featured">
+              <div class="download-card-top">
+                <span class="platform-icon platform-windows" aria-hidden="true">⊞</span>
+                <span class="platform-status">推荐</span>
+              </div>
+              <h3>Windows</h3>
+              <p>适用于 Windows 10 及以上版本。</p>
+              <a
+                class="download-link"
+                href="./download/"
+                data-download="Windows"
+              >
+                打开下载文件夹
+                <span aria-hidden="true">↓</span>
+              </a>
+            </article>
+            <article class="download-card">
+              <div class="download-card-top">
+                <span class="platform-icon platform-apple" aria-hidden="true">●</span>
+              </div>
+              <h3>macOS</h3>
+              <p>适用于 Apple Silicon 与 Intel Mac。</p>
+              <a
+                class="download-link"
+                href="./download/"
+                data-download="macOS"
+              >
+                打开下载文件夹
+                <span aria-hidden="true">↓</span>
+              </a>
+            </article>
+            <article class="download-card">
+              <div class="download-card-top">
+                <span class="platform-icon platform-linux" aria-hidden="true">◒</span>
+              </div>
+              <h3>Linux</h3>
+              <p>适用于主流 Linux 发行版。</p>
+              <a
+                class="download-link"
+                href="./download/"
+                data-download="Linux"
+              >
+                打开下载文件夹
+                <span aria-hidden="true">↓</span>
+              </a>
+            </article>
+          </div>
+
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer" id="links">
+      <div class="shell footer-top">
+        <div class="footer-brand">
+          <img src="./assets/wordmark.svg" alt="DeepSeek Harness" />
+          <p>DSH Desktop 是 DeepSeek Harness 的社区桌面封装。</p>
+        </div>
+        <div class="footer-links">
+          <a href="https://platform.deepseek.com/" target="_blank" rel="noreferrer">
+            <span>DeepSeek 开放平台</span>
+            <span aria-hidden="true">↗</span>
+          </a>
+          <a href="https://github.com/deepseek-ai/deepseek-harness" target="_blank" rel="noreferrer">
+            <span>官方 Harness 仓库</span>
+            <span aria-hidden="true">↗</span>
+          </a>
+          <a href="https://github.com/oykb58246/dsh-desktop" target="_blank" rel="noreferrer">
+            <span>dsh-desktop 仓库</span>
+            <span aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </div>
+      <div class="shell footer-bottom">
+        <span>DSH Desktop</span>
+        <span>Open source, built around the official Harness.</span>
+      </div>
+    </footer>
+
+    <div class="toast" role="status" aria-live="polite"></div>
+    <script src="./script.js"></script>
+  </body>
+</html>

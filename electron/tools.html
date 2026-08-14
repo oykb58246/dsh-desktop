@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DSH Desktop 工具区</title>
+    <link rel="stylesheet" href="./tools.css" />
+  </head>
+  <body>
+    <header class="tools-chrome" id="tools-chrome">
+      <img class="tools-chrome__icon" src="../website/assets/favicon.svg" alt="" />
+      <strong class="tools-chrome__title">DSH Desktop 工具区</strong>
+      <div class="tools-chrome__actions">
+        <button class="tools-chrome__button" data-action="minimize" aria-label="最小化" title="最小化"></button>
+        <button class="tools-chrome__button" data-action="maximize" aria-label="最大化" title="最大化"></button>
+        <button class="tools-chrome__button tools-chrome__button--close" data-action="close" aria-label="关闭" title="关闭"></button>
+      </div>
+    </header>
+
+    <div class="workbench">
+      <nav class="tool-rail" aria-label="工具列表">
+        <button class="tool-rail__item is-active" data-tool="codex-import">
+          <span class="tool-rail__icon" aria-hidden="true">⇥</span>
+          <span class="tool-rail__copy">
+            <strong>Codex 项目导入</strong>
+            <small>项目与会话一键导入</small>
+          </span>
+        </button>
+        <button class="tool-rail__item" data-tool="update-check">
+          <span class="tool-rail__icon" aria-hidden="true">⤓</span>
+          <span class="tool-rail__copy">
+            <strong>检查更新</strong>
+            <small>对准官方仓库基线</small>
+          </span>
+        </button>
+        <button class="tool-rail__item is-disabled" data-tool="coming-soon" disabled>
+          <span class="tool-rail__icon" aria-hidden="true">◫</span>
+          <span class="tool-rail__copy">
+            <strong>会话管理</strong>
+            <small>即将推出</small>
+          </span>
+        </button>
+        <button class="tool-rail__item is-disabled" data-tool="coming-soon-2" disabled>
+          <span class="tool-rail__icon" aria-hidden="true">↻</span>
+          <span class="tool-rail__copy">
+            <strong>同步与回收站</strong>
+            <small>即将推出</small>
+          </span>
+        </button>
+      </nav>
+
+      <main class="tool-stage" id="codex-import">
+        <div class="stage-heading">
+          <div>
+            <p class="eyebrow">CODEX PROJECT BRIDGE</p>
+            <h1>Codex 项目导入</h1>
+          </div>
+          <button class="button button--secondary" id="refresh-scan" type="button">↻ 刷新列表</button>
+        </div>
+
+        <div class="config-strip">
+          <div class="config-item">
+            <span class="config-item__label">Codex 会话目录</span>
+            <span class="config-item__path" id="sessions-dir-path">检测中…</span>
+            <span class="badge" id="sessions-dir-badge">自动检测</span>
+            <button class="button button--secondary button--mini" id="choose-sessions-dir" type="button">自定义</button>
+            <button class="button button--secondary button--mini" id="reset-sessions-dir" type="button" disabled>恢复默认</button>
+          </div>
+          <div class="config-item">
+            <span class="config-item__label">导入到 Harness</span>
+            <span class="config-item__path" id="target-path">默认目录</span>
+            <button class="button button--secondary button--mini" id="choose-target" type="button">选择目录</button>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-card"><span class="stat-card__label">项目</span><strong id="stat-projects">0</strong></div>
+          <div class="stat-card"><span class="stat-card__label">会话</span><strong id="stat-sessions">0</strong></div>
+          <div class="stat-card stat-card--accent"><span class="stat-card__label">已选项目</span><strong id="stat-checked-projects">0</strong></div>
+          <div class="stat-card stat-card--accent"><span class="stat-card__label">已选会话</span><strong id="stat-checked-sessions">0</strong></div>
+          <div class="stat-card"><span class="stat-card__label">已导入</span><strong id="stat-imported">0</strong></div>
+        </div>
+
+        <div class="list-toolbar">
+          <label class="search-box">
+            <span aria-hidden="true">⌕</span>
+            <input id="search-input" type="search" placeholder="搜索项目或会话…" />
+          </label>
+          <label class="sort-box">
+            <span>排序</span>
+            <select id="sort-select">
+              <option value="recent">按最近活动</option>
+              <option value="name">按名称</option>
+              <option value="sessions">按会话数</option>
+            </select>
+          </label>
+          <button class="text-button" id="expand-all" type="button">展开全部</button>
+          <button class="text-button" id="collapse-all" type="button">收起全部</button>
+          <span class="list-toolbar__spacer"></span>
+          <button class="text-button" id="select-all" type="button">全选</button>
+          <button class="text-button" id="select-none" type="button">清空选择</button>
+        </div>
+
+        <div class="project-list" id="project-list">
+          <div class="empty-note">正在扫描 Codex 会话目录…</div>
+        </div>
+
+        <div class="import-action">
+          <span class="import-action__summary" id="selection-summary">未选择任何内容</span>
+          <button class="button button--primary button--wide" id="run-import" type="button" disabled>一键导入所选项目与会话 <span>→</span></button>
+        </div>
+
+        <div class="progress-box" id="progress-box" hidden>
+          <div class="progress-box__label" id="progress-label">准备中…</div>
+          <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+          <div class="progress-box__detail" id="progress-detail"></div>
+        </div>
+
+        <div class="done-report" id="done-report" hidden></div>
+      </main>
+
+      <main class="tool-stage" id="update-check" hidden>
+        <div class="stage-heading">
+          <div>
+            <p class="eyebrow">OFFICIAL REPOSITORY BASELINE</p>
+            <h1>检查更新</h1>
+          </div>
+          <div class="stage-heading__actions">
+            <button class="button button--secondary" id="update-open-repo" type="button">↗ 官方仓库</button>
+            <button class="button button--primary" id="update-check-now" type="button">↻ 检查更新</button>
+          </div>
+        </div>
+
+        <div class="stat-grid stat-grid--update">
+          <div class="stat-card">
+            <span class="stat-card__label">当前版本</span>
+            <strong id="update-current-version">—</strong>
+            <span class="stat-card__meta" id="update-current-meta">…</span>
+          </div>
+          <div class="stat-card stat-card--accent">
+            <span class="stat-card__label">官方基线</span>
+            <strong id="update-latest-version">—</strong>
+            <span class="stat-card__meta" id="update-latest-meta">…</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__label">内核 @deepseek-ai/dsh</span>
+            <strong id="update-kernel-version">—</strong>
+            <span class="stat-card__meta" id="update-kernel-meta">…</span>
+          </div>
+        </div>
+
+        <div class="update-status" id="update-status" role="status" aria-live="polite"></div>
+
+        <div class="progress-box" id="update-progress-box" hidden>
+          <div class="progress-box__label" id="update-progress-label">下载中…</div>
+          <div class="progress-track"><div class="progress-fill" id="update-progress-fill"></div></div>
+          <div class="progress-box__detail" id="update-progress-detail"></div>
+        </div>
+
+        <div class="update-actions">
+          <button class="button button--primary button--wide" id="update-now" type="button" hidden>立即更新 <span>→</span></button>
+          <button class="button button--primary button--wide" id="update-apply" type="button" hidden>重启并更新 <span>→</span></button>
+          <button class="button button--secondary" id="update-cancel" type="button" hidden>取消下载</button>
+        </div>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./tools.js"></script>
+  </body>
+</html>

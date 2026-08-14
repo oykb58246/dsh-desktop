@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DSH Desktop</title>
+    <style>
+      :root { color-scheme: dark; --brand: #4d6bfe; --aqua: #8ddcff; --deep: #08152d; }
+      * { box-sizing: border-box; }
+      body { margin: 0; height: 100vh; overflow: hidden; color: #f2f6ff; font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: #08152d; }
+      .ocean { position: relative; width: 100%; height: 100%; overflow: hidden; border: 1px solid rgba(126, 193, 255, .28); border-radius: 18px; background: radial-gradient(ellipse 70% 90% at 50% 42%, rgba(76, 107, 254, .35), transparent 68%), linear-gradient(150deg, #10275a, var(--deep) 72%); box-shadow: inset 0 0 64px rgba(119, 198, 255, .08), 0 18px 45px rgba(1, 10, 30, .45); }
+      .brand { position: absolute; top: 18px; left: 20px; z-index: 5; display: flex; align-items: center; gap: 9px; font-weight: 650; font-size: 14px; letter-spacing: .02em; }
+      .brand img { width: 26px; height: 26px; }
+      .brand small { color: #a8c5f0; font-size: 11px; font-weight: 500; }
+      .glow { position: absolute; left: 50%; top: 45%; width: 190px; height: 112px; border-radius: 50%; transform: translate(-50%, -50%); background: rgba(77, 107, 254, .35); filter: blur(30px); animation: glow 2.5s ease-in-out infinite; }
+      .official-whale { position: absolute; z-index: 3; left: 50%; top: 45%; width: 104px; height: 104px; transform: translate(-50%, -50%); animation: drift 3.8s ease-in-out infinite; filter: drop-shadow(0 12px 16px rgba(7, 29, 88, .48)); }
+      .official-whale img { width: 100%; height: 100%; object-fit: contain; }
+      .bubble { position: absolute; z-index: 2; border: 1px solid rgba(183, 235, 255, .72); border-radius: 50%; animation: bubble 3s ease-in infinite; }.bubble.one { left: 59%; top: 40%; width: 8px; height: 8px; }.bubble.two { left: 63%; top: 48%; width: 12px; height: 12px; animation-delay: 1.2s; }.bubble.three { left: 36%; top: 48%; width: 5px; height: 5px; animation-delay: 2s; }
+      .ripple { position: absolute; z-index: 1; left: 50%; top: 62%; width: 80px; height: 18px; border: 2px solid rgba(141, 220, 255, .36); border-radius: 50%; transform: translate(-50%, -50%); animation: ripple 2.4s ease-out infinite; }.ripple.two { animation-delay: .78s; }.ripple.three { animation-delay: 1.56s; }
+      .water { position: absolute; left: -20%; bottom: -55px; width: 145%; height: 116px; border-radius: 48% 52% 0 0; background: linear-gradient(#184d91, #0d2860); opacity: .75; animation: wave 5s ease-in-out infinite; }.water.two { bottom: -72px; left: -35%; opacity: .5; background: #3672ba; animation-delay: -2.4s; animation-duration: 6.8s; }
+      .copy { position: absolute; z-index: 6; left: 0; right: 0; bottom: 25px; text-align: center; }.copy strong { display: block; font-size: 15px; letter-spacing: .03em; }.copy span { display: block; margin-top: 6px; color: #b1ceef; font-size: 12px; }
+      .close { position: absolute; top: 10px; right: 10px; z-index: 20; width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: #cfe2ff; font-size: 15px; line-height: 1; cursor: pointer; }
+      .close:hover { background: rgba(255, 255, 255, .14); }
+      .close:active { background: rgba(255, 255, 255, .2); }
+      .log { display: none; position: absolute; z-index: 8; inset: 70px 16px 16px; overflow: auto; padding: 12px; border-radius: 10px; background: #071326e8; color: #f3f6ff; font: 11px/1.5 Consolas, monospace; white-space: pre-wrap; }.log.visible { display: block; }
+      @keyframes drift { 0%,100% { transform: translate(-50%, -50%) translateX(-4px) rotate(-5deg); } 50% { transform: translate(-50%, -50%) translateX(5px) translateY(-8px) rotate(5deg); } }
+      @keyframes glow { 50% { transform: translate(-50%, -50%) scale(1.16); opacity: .72; } }
+      @keyframes ripple { from { opacity: .8; transform: translate(-50%, -50%) scale(.35); } to { opacity: 0; transform: translate(-50%, -50%) scale(2.7); } }
+      @keyframes bubble { from { opacity: 0; transform: translateY(12px) scale(.35); } 28% { opacity: 1; } to { opacity: 0; transform: translateY(-50px) scale(1.25); } }
+      @keyframes wave { 0%,100% { transform: translateX(-2%) rotate(-2deg); } 50% { transform: translateX(4%) rotate(2deg); } }
+      @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
+    </style>
+  </head>
+  <body>
+    <main class="ocean">
+      <button class="close" title="关闭" aria-label="关闭">&#10005;</button>
+      <div class="brand"><img src="../website/assets/favicon.svg" alt="" /><span>DSH Desktop</span><small>正在启动</small></div>
+      <div class="glow"></div>
+      <div class="official-whale"><img src="../website/assets/favicon.svg" alt="DeepSeek" /></div>
+      <i class="bubble one"></i><i class="bubble two"></i><i class="bubble three"></i>
+      <div class="ripple"></div><div class="ripple two"></div><div class="ripple three"></div>
+      <div class="water"></div><div class="water two"></div>
+      <div class="copy"><strong id="headline">dsh-desktop 启动中</strong><span>正在连接本地 DSH 服务</span></div>
+      <pre class="log" id="log"></pre>
+    </main>
+    <script>
+      const headline = document.getElementById('headline')
+      const log = document.getElementById('log')
+      window.dshDesktop.onStatus((payload) => {
+        if (payload?.headline === 'Startup failed') {
+          headline.textContent = '启动失败'
+          log.classList.add('visible')
+          log.textContent += `${log.textContent ? '\n' : ''}${payload.message || ''}`
+        }
+      })
+      document.querySelector('.close').addEventListener('click', () => {
+        window.dshDesktop.windowAction('close')
+      })
+    </script>
+  </body>
+</html>

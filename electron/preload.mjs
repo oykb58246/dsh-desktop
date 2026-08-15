@@ -89,6 +89,33 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   archiveRestoreSession(sessionId) {
     return ipcRenderer.invoke('archive:restore-session', sessionId)
   },
+  /** Web 远程控制 bridges（工具区「Web 远程控制」面板）。 */
+  remoteGetState() {
+    return ipcRenderer.invoke('remote:get-state')
+  },
+  remoteSetLan(enabled) {
+    return ipcRenderer.invoke('remote:set-lan', enabled)
+  },
+  remoteSetPublic(enabled) {
+    return ipcRenderer.invoke('remote:set-public', enabled)
+  },
+  remoteRefresh() {
+    return ipcRenderer.invoke('remote:refresh')
+  },
+  remoteResetToken() {
+    return ipcRenderer.invoke('remote:reset-token')
+  },
+  remoteSetPort(port) {
+    return ipcRenderer.invoke('remote:set-port', port)
+  },
+  remoteQr(text) {
+    return ipcRenderer.invoke('remote:qr', text)
+  },
+  onRemoteState(callback) {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('remote:state', listener)
+    return () => ipcRenderer.removeListener('remote:state', listener)
+  },
   /** Installer UI bridges (used by installer.html). */
   installerDefaults() {
     return ipcRenderer.invoke('installer:defaults')

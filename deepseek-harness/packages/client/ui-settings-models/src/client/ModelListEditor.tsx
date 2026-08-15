@@ -144,6 +144,33 @@ function capacitySpelling(value: number | undefined): string {
   return value === undefined ? '' : formatCapacity(value)
 }
 
+/**
+ * Whether a hand-declared id belongs to a chat-vision family the installed
+ * catalog already records as image-capable (`grok`/`claude`/`gemini`/`gemma`,
+ * or an explicit `vl`/`vision` token). Image-generation ids stay out.
+ * @param id - the model id the row or candidate carries.
+ * @returns whether adopting or displaying this id should offer image input.
+ */
+export function likelyVisionModelId(id: string): boolean {
+  const token = id.toLowerCase().split('/').pop() ?? id.toLowerCase()
+  if (token.includes('imagine')) return false
+  return /^(grok|claude|gemini|gemma)(?:-|$)/.test(token)
+    || /(?:^|[.\-_])(?:vl|vision)(?:[.\-_]|$)/.test(token)
+}
+
+/** The stored `input` list, or `undefined` when the row states no answer. */
+function inputOf(model: ModelDraft): readonly string[] | undefined {
+  const value = model.input
+  return Array.isArray(value) ? value.map(String) : undefined
+}
+
+/** Whether this row currently claims image input, including a likely-vision id with no stored list. */
+function acceptsImages(model: ModelDraft): boolean {
+  const input = inputOf(model)
+  if (input !== undefined) return input.includes('image')
+  return likelyVisionModelId(textOf(model, 'id'))
+}
+
 /** Adopt a candidate, keeping whatever capacities the provider disclosed. */
 function adopt(candidate: DiscoveredModelView): ModelDraft {
   return {
@@ -151,6 +178,7 @@ function adopt(candidate: DiscoveredModelView): ModelDraft {
     ...candidate.name === undefined ? {} : { name: candidate.name },
     ...candidate.contextWindow === undefined ? {} : { contextWindow: candidate.contextWindow },
     ...candidate.maxTokens === undefined ? {} : { maxTokens: candidate.maxTokens },
+    ...likelyVisionModelId(candidate.id) ? { input: ['text', 'image'] } : {},
   }
 }
 
@@ -417,6 +445,23 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
                     disabled={disabled}
                     onChange={(event) => { editCapacity(index, 'maxTokens', event.target.value) }}
                   />
+                </label>
+                <label className={styles['modelField']}>
+                  <span className={styles['modelFieldLabel']}>{t('modelAcceptsImages')}</span>
+                  <label className={styles['candidateLabel']}>
+                    <input
+                      type="checkbox"
+                      checked={acceptsImages(model)}
+                      aria-label={`${t('modelAcceptsImages')} ${index + 1}`}
+                      disabled={disabled}
+                      onChange={(event) => {
+                        patch(index, {
+                          input: event.target.checked ? ['text', 'image'] : ['text'],
+                        })
+                      }}
+                    />
+                    <span>{t('modelAcceptsImagesHint')}</span>
+                  </label>
                 </label>
                 <ReasoningEffortsField
                   levels={reasoningLevelsOf(model)}

@@ -24,3 +24,6 @@ cockpit-tools/
 $testDir/
 prototypes/
 .playwright-mcp/
+
+# Downloaded cloudflared binary (~55 MB); scripts/fetch-cloudflared.mjs restores it
+electron/vendor/cloudflared.exe

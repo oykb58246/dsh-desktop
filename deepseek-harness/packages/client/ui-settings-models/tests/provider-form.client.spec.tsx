@@ -8,6 +8,7 @@ import type { RpcResponse, SettingsNamespaceView } from '@deepseek-ai/dsh-api-re
 import { ModelsSection, providerCopy } from '../src/client/ModelsSection.tsx'
 import type { ModelsSectionInjected } from '../src/client/ModelsSection.tsx'
 import { CustomProviderCard } from '../src/client/CustomProviderCard.tsx'
+import { likelyVisionModelId } from '../src/client/ModelListEditor.tsx'
 import { formatCapacity, parseCapacity } from '../src/client/DeepSeekModelsEditor.tsx'
 import { ModelsSettingsStore, deriveKeyRef, protocolChoices } from '../src/client/store.ts'
 import { en } from '../src/client/locales.ts'
@@ -191,6 +192,16 @@ describe('protocolChoices', () => {
   })
 })
 
+describe('likelyVisionModelId', () => {
+  it('recognizes chat-vision families and rejects image-generation ids', () => {
+    expect(likelyVisionModelId('grok-4.6')).toBe(true)
+    expect(likelyVisionModelId('xai/grok-4.5')).toBe(true)
+    expect(likelyVisionModelId('qwen2.5-vl-72b')).toBe(true)
+    expect(likelyVisionModelId('grok-imagine-image')).toBe(false)
+    expect(likelyVisionModelId('deepseek-v4-flash')).toBe(false)
+  })
+})
+
 describe('model list editing', () => {
   it('adds, edits, and removes rows without storing emptied optional fields', async () => {
     const { mutate } = await mountSection()
@@ -211,6 +222,28 @@ describe('model list editing', () => {
       expectedRevision: 3,
       ops: [{ op: 'set', path: ['providers', 'openai', 'models'], value: [{ id: 'acme-large', contextWindow: 65_536 }] }],
     })
+  })
+
+  it('writes image input when the user ticks a vision-capable model', async () => {
+    const { mutate } = await mountSection()
+    openEditor('openai')
+
+    fireEvent.click(screen.getByRole('button', { name: en.addModel }))
+    fireEvent.change(screen.getByLabelText(`${en.modelId} 1`), { target: { value: 'grok-4.6' } })
+    expandModel(1)
+    const box = screen.getByLabelText(`${en.modelAcceptsImages} 1`) as HTMLInputElement
+    // A grok id shows as image-capable before anything is stored, matching
+    // the adapter's family hint, so the first click turns the claim off.
+    expect(box.checked).toBe(true)
+    fireEvent.click(box)
+    expect(box.checked).toBe(false)
+    fireEvent.click(box)
+    fireEvent.click(screen.getByText(en.apply))
+
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops[0]?.value).toEqual([
+      { id: 'grok-4.6', input: ['text', 'image'] },
+    ])
   })
 
   it('names a duplicate model id in the edit flow too', async () => {
@@ -485,6 +518,27 @@ describe('endpoint interrogation', () => {
     expect(firstMutate(mutate).ops[0]?.value).toEqual([
       { id: 'kept', contextWindow: 111 },
       { id: 'fresh', contextWindow: 4096, name: 'Fresh' },
+    ])
+  })
+
+  it('adopts a grok candidate with image input so the vision bridge stays out', async () => {
+    const discover = vi.fn(() => Promise.resolve(ok({
+      models: [{ id: 'grok-4.6', name: 'Grok 4.6' }],
+    })))
+    const { mutate } = await mountSection({
+      discover,
+      providers: { openai: { baseURL: 'https://proxy.example/v1', models: [] } },
+    })
+    openEditor('openai')
+
+    fireEvent.click(screen.getByText(en.fetchModels))
+    await screen.findByText(en.fetchTitle)
+    fireEvent.click(screen.getByText(en.fetchAdopt))
+    fireEvent.click(screen.getByText(en.apply))
+
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops[0]?.value).toEqual([
+      { id: 'grok-4.6', name: 'Grok 4.6', input: ['text', 'image'] },
     ])
   })
 

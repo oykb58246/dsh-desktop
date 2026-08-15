@@ -61,6 +61,69 @@ function declaredInput(configured: readonly PiAiModality[] | undefined): Model<A
 }
 
 /**
+ * Family stem used only to inherit image input for a model the installed
+ * catalog has not caught up with (`grok-4.6` beside shipped `grok-4.5`).
+ * Image-generation ids (`imagine`) stay out: they are not chat vision.
+ * @param id - a model id, possibly prefixed with an org path.
+ * @returns the family key, or `undefined` when this id is not in a vision family.
+ */
+function visionFamilyOf(id: string): string | undefined {
+  const token = id.toLowerCase().split('/').pop() ?? id.toLowerCase()
+  if (token.includes('imagine')) return undefined
+  const match = /^(grok|claude|gemini|gemma)(?:-|$)/.exec(token)
+  return match?.[1]
+}
+
+interface CatalogInputIndex {
+  /** First exact catalog id wins; later providers do not overwrite it. */
+  exact: Map<string, Model<Api>['input']>
+  /** Whether every installed sibling in the family already accepts images. */
+  families: Map<string, boolean>
+}
+
+let inputIndex: CatalogInputIndex | undefined
+
+/**
+ * Walk the installed catalog once: exact ids, then per-family unanimity.
+ * @returns the cached index.
+ */
+function catalogInputIndex(): CatalogInputIndex {
+  if (inputIndex !== undefined) return inputIndex
+  const exact = new Map<string, Model<Api>['input']>()
+  const families = new Map<string, boolean>()
+  for (const provider of catalogProviderIds()) {
+    for (const model of catalogModels(provider).values()) {
+      if (!exact.has(model.id)) exact.set(model.id, [...model.input])
+      const family = visionFamilyOf(model.id)
+      if (family === undefined) continue
+      if (!model.input.includes('image')) families.set(family, false)
+      else if (!families.has(family)) families.set(family, true)
+    }
+  }
+  inputIndex = { exact, families }
+  return inputIndex
+}
+
+/**
+ * Modalities an undescribed model may inherit from the installed catalog.
+ * An exact id on any catalog route wins; otherwise a family in which every
+ * installed sibling already accepts images (`grok-4.6` beside `grok-4.5`)
+ * yields `[text, image]`. A family with any text-only sibling, or no sibling,
+ * states no answer so the route default stays conservative.
+ * @param id - the model id being materialized.
+ * @returns inherited modalities, or `undefined` to keep asking.
+ */
+export function catalogInputHint(id: string): Model<Api>['input'] | undefined {
+  if (id.length === 0) return undefined
+  const index = catalogInputIndex()
+  const exact = index.exact.get(id)
+  if (exact !== undefined) return [...exact]
+  const family = visionFamilyOf(id)
+  if (family !== undefined && index.families.get(family) === true) return ['text', 'image']
+  return undefined
+}
+
+/**
  * Every pi-ai thinking level, in pi-ai's canonical escalation order. The
  * `Record` key type is a drift gate: a pi-ai upgrade that adds or removes a
  * level fails compilation here naming the drifted key, instead of silently
@@ -219,10 +282,12 @@ export interface PiAiModelProfile {
    * installed catalog entry's modalities, then the route's `defaultInput`.
    * Declaring images is what makes a hand-declared vision model usable, and
    * declaring text alone corrects a catalog model whose gateway does not serve
-   * what the catalog records. This is a claim about the endpoint, not a check
-   * of it: nothing interrogates a gateway for what it accepts, so a model
-   * claiming images its endpoint refuses is refused by the provider instead,
-   * mid-turn.
+   * what the catalog records. When the entry states no answer, resolution also
+   * asks {@link catalogInputHint} before the route default, so a newer sibling
+   * of a shipped vision family (`grok-4.6` beside `grok-4.5`) inherits images.
+   * This is a claim about the endpoint, not a check of it: nothing interrogates
+   * a gateway for what it accepts, so a model claiming images its endpoint
+   * refuses is refused by the provider instead, mid-turn.
    */
   input?: PiAiModality[]
   /**
@@ -530,7 +595,10 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
       api,
       provider,
       baseUrl,
-      input: declaredInput(entry.input) ?? base?.input ?? [...request.defaultInput],
+      input: declaredInput(entry.input)
+        ?? base?.input
+        ?? catalogInputHint(entry.id)
+        ?? [...request.defaultInput],
       cost: base?.cost ?? NO_COST,
       contextWindow,
       maxTokens,

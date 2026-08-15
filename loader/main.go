@@ -1111,7 +1111,7 @@ func registerApp(target string) error {
 	key := `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\2964e23e-3f18-500c-b3e7-68e9fa24df7a`
 	values := [][2]string{
 		{"DisplayName", "DSH Desktop"},
-		{"DisplayVersion", "0.1.1"},
+		{"DisplayVersion", "0.1.2"},
 		{"Publisher", "DSH Desktop"},
 		{"InstallLocation", target},
 		{"UninstallString", `"` + exe + `" --uninstall`},

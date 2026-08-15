@@ -29,6 +29,28 @@
   border-right: 1px solid var(--dsw-alias-border-l1);
 }
 
+/* Narrow manual re-expand: the sidebar floats above the center as an overlay
+   drawer (AppFrame data-sidebar-overlay). The grid track is zero, so the
+   center keeps full width; the drawer's own width comes from the component
+   (SidebarRoot inline width), and the backdrop below it closes on click. */
+.frame[data-sidebar-overlay] .sidebarCol {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  box-shadow: 18px 0 48px rgba(4, 10, 24, 0.45);
+}
+
+/* Click-to-close scrim under the overlay drawer (above column content and
+   the shell overlay layer, below the drawer itself). */
+.backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  background: rgba(4, 10, 24, 0.45);
+}
+
 .centerCol {
   min-width: 0;
   display: flex;

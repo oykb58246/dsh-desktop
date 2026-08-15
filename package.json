@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Electron desktop shell for DeepSeek Harness.",
   "main": "electron/main.mjs",
@@ -15,8 +15,9 @@
     "dev": "electron .",
     "start": "electron .",
     "bootstrap:harness": "corepack pnpm install --dir deepseek-harness && corepack pnpm --dir deepseek-harness run build",
+    "fetch:cloudflared": "node scripts/fetch-cloudflared.mjs",
     "prepare:runtime": "node scripts/prepare-runtime.mjs",
-    "dist:win": "pnpm generate:icon && pnpm generate:splash && pnpm generate:loader-bg && pnpm prepare:runtime && electron-builder --win dir --x64 && node scripts/set-icon.cjs && node scripts/append-payload.mjs && node scripts/write-latest-yml.mjs"
+    "dist:win": "pnpm fetch:cloudflared && pnpm generate:icon && pnpm generate:splash && pnpm generate:loader-bg && pnpm prepare:runtime && electron-builder --win dir --x64 && node scripts/set-icon.cjs && node scripts/append-payload.mjs && node scripts/write-latest-yml.mjs"
   },
   "devDependencies": {
     "electron": "^37.3.1",
@@ -27,6 +28,9 @@
     "appId": "com.oykb58246.dsh-desktop",
     "productName": "DSH Desktop",
     "asar": true,
+    "asarUnpack": [
+      "electron/vendor/**"
+    ],
     "icon": "assets/icon.ico",
     "directories": {
       "output": "website/download",

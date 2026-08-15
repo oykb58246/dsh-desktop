@@ -1523,3 +1523,105 @@ select.tools-input {
 .config-item .vision-test-status--fail {
   color: #f09aa6;
 }
+
+/* ---------- web remote control panel ---------- */
+
+.remote-intro {
+  margin: 0 0 18px;
+  max-width: 720px;
+  color: #a8c5f0;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.remote-section {
+  margin-bottom: 20px;
+  max-width: 860px;
+}
+
+.remote-section > .vision-switch {
+  margin-bottom: 10px;
+}
+
+.remote-links {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #101826;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.remote-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.remote-link-url {
+  flex: 1 1 320px;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cfe2ff;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.remote-link-row .button--mini {
+  flex: 0 0 auto;
+}
+
+.remote-qr {
+  display: none;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #fff;
+  width: fit-content;
+}
+
+.remote-qr.is-visible {
+  display: block;
+}
+
+.remote-qr svg {
+  display: block;
+  width: 148px;
+  height: 148px;
+}
+
+.remote-token-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.remote-port-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #9aa7bf;
+  font-size: 12.5px;
+}
+
+.tools-input--port {
+  width: 110px;
+}
+
+#remote-token {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  color: #cfe2ff;
+  user-select: all;
+}
+
+.remote-links .empty-note {
+  padding: 6px 2px;
+}

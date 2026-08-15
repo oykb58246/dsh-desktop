@@ -20,6 +20,7 @@ import {
 } from './codex-import.mjs'
 import { registerUpdateIpc, runBackgroundCheck, compareVersions } from './updater.mjs'
 import { changelog } from './changelog.mjs'
+import { RemoteControl } from './remote-control.mjs'
 
 const desktopRoot = path.resolve(import.meta.dirname, '..')
 const harnessRoot = app.isPackaged
@@ -38,6 +39,11 @@ const appIconPath = app.isPackaged
 const appLogoPath = app.isPackaged
   ? path.join(process.resourcesPath, 'app.asar', 'website', 'assets', 'favicon.svg')
   : path.join(desktopRoot, 'website', 'assets', 'favicon.svg')
+// cloudflared ships inside the shell payload: electron-builder unpacks it
+// (asarUnpack) so the main process can spawn the real executable.
+const cloudflaredBin = app.isPackaged
+  ? path.join(process.resourcesPath, 'app.asar.unpacked', 'electron', 'vendor', 'cloudflared.exe')
+  : path.join(desktopRoot, 'electron', 'vendor', 'cloudflared.exe')
 const isWindows = process.platform === 'win32'
 const statusText = {
   start: 'Starting deepseek-harness',
@@ -57,6 +63,9 @@ let loadingWindow = true
 // once the harness page is loaded: non-null means an install/update happened
 // since the last run and the dialog must be shown.
 let pendingChangelog = null
+
+// Web 远程控制服务（工具区面板驱动）：null 直到 boot 成功启动后创建。
+let remoteControl = null
 
 const dshHomeDir = path.join(app.getPath('userData'), 'dsh-home')
 
@@ -326,7 +335,7 @@ app.setAppUserModelId('com.oykb58246.dsh-desktop')
 
 // ---------- installer constants & modes ----------
 const APP_GUID = '2964e23e-3f18-500c-b3e7-68e9fa24df7a'
-const APP_VERSION = '0.1.1'
+const APP_VERSION = '0.1.2'
 const UNINSTALL_KEY = 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + APP_GUID
 const INI_PATH = 'C:\\dsh-desktop.ini'
 const INSTALL_LOG = 'C:\\dsh-desktop-install.log'
@@ -544,6 +553,87 @@ ipcMain.handle('archive:restore-workspace', async (_event, workspaceId) => {
 
 ipcMain.handle('archive:restore-session', async (_event, sessionId) => {
   return await callHarnessRpc('workspace.unarchiveSession', { sessionId })
+})
+
+// ---------- web remote control (工具区「Web 远程控制」面板) ----------
+
+/** Push one remote-control snapshot to the tools window, when open. */
+function sendRemoteState(payload) {
+  if (toolsWindow === null || toolsWindow.isDestroyed()) return
+  toolsWindow.webContents.send('remote:state', payload)
+}
+
+/** Create the remote-control service once the harness URL is known. */
+function ensureRemoteControl() {
+  if (remoteControl !== null) return
+  remoteControl = new RemoteControl({
+    configPath: path.join(app.getPath('userData'), 'remote-control.json'),
+    cloudflaredBin,
+    getHarnessTarget: () => {
+      if (harnessUrl === null) return null
+      try {
+        const url = new URL(harnessUrl)
+        return { host: url.hostname, port: Number(url.port) }
+      } catch {
+        return null
+      }
+    },
+    sendState: sendRemoteState,
+  })
+}
+
+/** Render one text as an SVG QR code (vendor qrcode-generator, offline). */
+function renderQrSvg(text) {
+  const qrcode = require2('./vendor/qrcode.cjs')
+  const qr = qrcode(0, 'L')
+  qr.addData(String(text), 'Byte')
+  qr.make()
+  return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true })
+}
+
+ipcMain.handle('remote:get-state', async () => {
+  if (remoteControl === null) return null
+  await remoteControl.probeLan()
+  return remoteControl.snapshot()
+})
+
+ipcMain.handle('remote:set-lan', async (_event, enabled) => {
+  if (remoteControl === null) return null
+  remoteControl.setLan(enabled === true)
+  return remoteControl.snapshot()
+})
+
+ipcMain.handle('remote:set-public', async (_event, enabled) => {
+  if (remoteControl === null) return null
+  remoteControl.setPublic(enabled === true)
+  return remoteControl.snapshot()
+})
+
+ipcMain.handle('remote:refresh', async () => {
+  if (remoteControl === null) return null
+  await remoteControl.probeLan(true)
+  return remoteControl.snapshot()
+})
+
+ipcMain.handle('remote:reset-token', async () => {
+  if (remoteControl === null) return null
+  await remoteControl.resetToken()
+  return remoteControl.snapshot()
+})
+
+ipcMain.handle('remote:set-port', async (_event, port) => {
+  if (remoteControl === null) return null
+  await remoteControl.setPort(port)
+  return remoteControl.snapshot()
+})
+
+ipcMain.handle('remote:qr', (_event, text) => {
+  if (typeof text !== 'string' || text === '' || text.length > 512) return null
+  try {
+    return renderQrSvg(text)
+  } catch {
+    return null
+  }
 })
 
 /**
@@ -1009,8 +1099,12 @@ async function injectWindowChrome() {
       #dsh-window-chrome .dsh-close::before { transform:translate(-50%,-50%) rotate(45deg); }
       #dsh-window-chrome .dsh-close::after { transform:translate(-50%,-50%) rotate(-45deg); }
       #dsh-window-chrome .dsh-tools::before, #dsh-window-chrome .dsh-tools::after { display:none; }
-      #dsh-window-chrome .dsh-tools svg { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); }
+      #dsh-window-chrome .dsh-tools { align-self:center; height:28px; border-radius:8px; background:linear-gradient(180deg,rgba(109,134,255,.30),rgba(77,107,254,.16)); border:1px solid rgba(130,152,255,.38); color:#c9d8ff; }
+      #dsh-window-chrome .dsh-tools svg { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; }
+      #dsh-window-chrome .dsh-tools:hover { background:linear-gradient(180deg,rgba(130,152,255,.44),rgba(77,107,254,.30)); color:#fff; }
       #dsh-window-chrome .dsh-tools.has-update::after { display:block; content:""; position:absolute; top:7px; right:8px; width:8px; height:8px; border-radius:50%; background:#4d8bfd; box-shadow:0 0 8px rgba(77,139,253,.95); }
+      html.dsh-light #dsh-window-chrome .dsh-tools { background:linear-gradient(180deg,rgba(77,107,254,.16),rgba(77,107,254,.08)); border-color:rgba(77,107,254,.34); color:#3b56c9; }
+      html.dsh-light #dsh-window-chrome .dsh-tools:hover { background:linear-gradient(180deg,rgba(77,107,254,.28),rgba(77,107,254,.16)); }
       #dsh-window-chrome button:hover { background:rgba(255,255,255,.10); opacity:1; }
       #dsh-window-chrome button[data-action="close"]:hover { background:#d94b5b; }
       html.dsh-light #dsh-window-chrome { color:#17212b; background:#f7f9fc; border-bottom-color:rgba(23,33,43,.12); }
@@ -1167,6 +1261,10 @@ async function boot() {
     // page exists; finishStartup shows it once the page is loaded.
     pendingChangelog = changelogForTransition(readSeenVersion())
     await launchHarness()
+    // Restore the remote-control switches the user left on: the forwarder
+    // targets harnessUrl, which launchHarness has just resolved.
+    ensureRemoteControl()
+    await remoteControl.restore()
     // Non-blocking: compare against the official repository baseline so the
     // title-bar wrench can flag available updates.
     void runBackgroundCheck().then((snapshot) => {
@@ -1698,6 +1796,7 @@ app.on('before-quit', (event) => {
   if (stopping) return
   stopping = true
   event.preventDefault()
+  remoteControl?.dispose()
   void stopHarnessProcess().finally(() => {
     app.exit()
   })

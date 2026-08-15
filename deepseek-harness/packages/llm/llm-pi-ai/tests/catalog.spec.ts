@@ -220,6 +220,29 @@ describe('hand-declared providers', () => {
     expect(inputOf('anthropic', vision.id)).toEqual(vision.input)
   })
 
+  it('inherits image input for a newer sibling of a shipped vision family', () => {
+    const resolved = resolveProfiles({
+      'acme-gateway': {
+        api: 'openai-completions',
+        baseURL: 'https://acme.test',
+        models: [
+          { id: 'grok-4.6' },
+          { id: 'grok-imagine-image' },
+          { id: 'plain-chat' },
+          { id: 'forced-text', input: ['text'] },
+        ],
+      },
+    })
+    const inputOf = (id: string): readonly string[] | undefined =>
+      resolved.get('acme-gateway')?.piProvider.getModels().find(model => model.id === id)?.input
+
+    expect(inputOf('grok-4.6')).toEqual(['text', 'image'])
+    // Image-generation ids are not chat vision, so the conservative route default stays.
+    expect(inputOf('grok-imagine-image')).toEqual(['text'])
+    expect(inputOf('plain-chat')).toEqual(['text'])
+    expect(inputOf('forced-text')).toEqual(['text'])
+  })
+
   it('carries a written modality declaration all the way to the seam’s model metadata', async () => {
     // The resolver-level cases above cannot see a break between the settings
     // document and `LlmModelInfo`, so each rung is asserted once more through

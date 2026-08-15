@@ -290,19 +290,50 @@ describe('AppFrame — narrow-viewport auto-collapse', () => {
     const { frame, slotCalls } = mountFrame()
     expect(tracks(frame)).toEqual([SIDEBAR_COLLAPSED, 0])
     expect(frame.hasAttribute('data-sidebar-collapsed')).toBe(true)
+    expect(frame.hasAttribute('data-sidebar-overlay')).toBe(false)
     expect(slotCalls.filter(c => c.key === 'sidebar').at(-1)!.props).toEqual({ collapsed: true, width: SIDEBAR_COLLAPSED })
     expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(0)
   })
 
-  it('narrow toggle re-expands over the squeezed center and back', () => {
+  it('narrow toggle opens an overlay drawer (zero track, full center, backdrop) and closes it', () => {
+    frameWidth = 980
+    const { frame, instance, slotCalls } = mountFrame()
+    act(() => { instance.actions.toggleSidebar() })
+    // The drawer does not consume a grid track: center keeps the full width.
+    expect(tracks(frame)).toEqual([0, 0])
+    expect(frame.hasAttribute('data-sidebar-overlay')).toBe(true)
+    expect(frame.hasAttribute('data-sidebar-collapsed')).toBe(false)
+    // The sidebar renders expanded at the drawer width (preference or default).
+    expect(slotCalls.filter(c => c.key === 'sidebar').at(-1)!.props).toEqual({ collapsed: false, width: 280 })
+    // A click-to-close scrim is present; no resize handle for the drawer.
+    expect(frame.querySelector('[class*="backdrop"]')).toBeTruthy()
+    expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(0)
+    act(() => { instance.actions.toggleSidebar() })
+    expect(tracks(frame)).toEqual([SIDEBAR_COLLAPSED, 0])
+    expect(frame.hasAttribute('data-sidebar-overlay')).toBe(false)
+  })
+
+  it('the overlay backdrop click closes the drawer', () => {
     frameWidth = 980
     const { frame, instance } = mountFrame()
     act(() => { instance.actions.toggleSidebar() })
-    expect(tracks(frame)).toEqual([280, 0])
-    expect(frame.hasAttribute('data-sidebar-collapsed')).toBe(false)
-    expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(1)
-    act(() => { instance.actions.toggleSidebar() })
+    expect(frame.hasAttribute('data-sidebar-overlay')).toBe(true)
+    const backdrop = frame.querySelector('[class*="backdrop"]')!
+    act(() => { backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(tracks(frame)).toEqual([SIDEBAR_COLLAPSED, 0])
+    expect(frame.hasAttribute('data-sidebar-overlay')).toBe(false)
+    expect(instance.getSnapshot().sidebar).toBe(280) // preference untouched
+  })
+
+  it('the drawer clamps to the viewport on a phone (24px content edge remains)', () => {
+    frameWidth = 390
+    const { frame, instance, slotCalls } = mountFrame()
+    act(() => { instance.actions.setSidebar(400) }) // a wide-drag preference
+    act(() => { instance.actions.toggleSidebar() })
+    expect(tracks(frame)).toEqual([0, 0])
+    expect(frame.hasAttribute('data-sidebar-overlay')).toBe(true)
+    expect(slotCalls.filter(c => c.key === 'sidebar').at(-1)!.props)
+      .toEqual({ collapsed: false, width: 366 }) // min(400, 390 - 24), clamped to SIDEBAR_MIN floor
   })
 
   it('a wide-closed preference re-expands at the contract default while narrow', () => {
@@ -312,7 +343,8 @@ describe('AppFrame — narrow-viewport auto-collapse', () => {
     frameWidth = 980
     act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
     act(() => { instance.actions.toggleSidebar() })
-    expect(tracks(frame)).toEqual([280, 0])
+    expect(tracks(frame)).toEqual([0, 0])
+    expect(frame.hasAttribute('data-sidebar-overlay')).toBe(true)
     expect(instance.getSnapshot().sidebar).toBe(0) // preference untouched
   })
 

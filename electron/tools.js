@@ -445,6 +445,9 @@ function switchTool(name) {
   if (name === 'archive-manage') {
     void refreshArchive()
   }
+  if (name === 'remote-control') {
+    void refreshRemote()
+  }
 }
 
 // ---------- update check panel ----------
@@ -798,6 +801,186 @@ function wireArchivePanel() {
   $('archive-refresh').addEventListener('click', () => { void refreshArchive() })
 }
 
+// ---------- web remote control panel ----------
+
+const remoteState = {
+  snapshot: null, // last snapshot from the main process
+  busy: false,
+}
+
+function setRemoteStatus(kind, text) {
+  const box = $('remote-status')
+  box.className = `update-status update-status--${kind}`
+  box.textContent = text
+}
+
+/** Render one link row (URL + copy + QR toggle) into a links container. */
+function renderLinkRow(box, url) {
+  const row = document.createElement('div')
+  row.className = 'remote-link-row'
+  row.innerHTML = `
+    <code class="remote-link-url"></code>
+    <button class="button button--secondary button--mini" type="button" data-copy>复制</button>
+    <button class="button button--secondary button--mini" type="button" data-qr>二维码</button>
+    <div class="remote-qr" hidden></div>`
+  row.querySelector('.remote-link-url').textContent = url
+  row.querySelector('[data-copy]').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(url)
+      showToast('链接已复制，可发送到手机')
+    } catch {
+      showToast('复制失败，请直接选择链接文本', true)
+    }
+  })
+  const qrBox = row.querySelector('.remote-qr')
+  row.querySelector('[data-qr]').addEventListener('click', async () => {
+    if (qrBox.hidden === false) {
+      qrBox.hidden = true
+      return
+    }
+    qrBox.hidden = false
+    qrBox.textContent = '生成中…'
+    try {
+      const svg = await api.remoteQr(url)
+      if (typeof svg === 'string' && svg !== '') qrBox.innerHTML = svg
+      else throw new Error('empty svg')
+    } catch {
+      qrBox.hidden = true
+      showToast('二维码生成失败，请使用复制链接', true)
+    }
+  })
+  box.appendChild(row)
+}
+
+/** Render one remote-control snapshot into the panel. */
+function renderRemote(snapshot) {
+  if (snapshot === null) return
+  remoteState.snapshot = snapshot
+  $('remote-lan-enabled').checked = snapshot.lanEnabled === true
+  $('remote-public-enabled').checked = snapshot.publicEnabled === true
+  $('remote-token').textContent = snapshot.token
+  $('remote-port').value = String(snapshot.port)
+
+  const lanBox = $('remote-lan-links')
+  lanBox.innerHTML = ''
+  if (snapshot.lanEnabled === true) {
+    lanBox.hidden = false
+    for (const url of snapshot.lanUrls ?? []) renderLinkRow(lanBox, `${url}/?token=${snapshot.token}`)
+  } else {
+    lanBox.hidden = true
+  }
+
+  const pubBox = $('remote-public-links')
+  pubBox.innerHTML = ''
+  if (snapshot.publicEnabled === true) {
+    pubBox.hidden = false
+    if (snapshot.publicUrl !== null) {
+      renderLinkRow(pubBox, `${snapshot.publicUrl}/?token=${snapshot.token}`)
+    } else {
+      pubBox.innerHTML = '<div class="empty-note">正在建立公网隧道…（通常需要十几秒，可点击「刷新链接」查看最新状态）</div>'
+    }
+  } else {
+    pubBox.hidden = true
+  }
+
+  const problems = []
+  if (snapshot.proxyError) problems.push(`局域网服务异常：${snapshot.proxyError}`)
+  if (snapshot.tunnelError) problems.push(`公网隧道异常：${snapshot.tunnelError}`)
+  if (snapshot.harnessReady !== true) problems.push('DSH 服务尚未就绪，请稍后重试')
+  if (snapshot.lanEnabled === true && (snapshot.lanAddresses ?? []).length === 0) {
+    problems.push('未检测到局域网地址（电脑可能未连接网络）')
+  }
+  if (problems.length > 0) {
+    setRemoteStatus('warn', problems.join('；'))
+    return
+  }
+  if (snapshot.lanEnabled === true || snapshot.publicEnabled === true) {
+    const channels = []
+    if (snapshot.lanEnabled === true) channels.push(`局域网 :${snapshot.port}`)
+    if (snapshot.publicEnabled === true) {
+      channels.push(snapshot.publicUrl !== null ? '公网隧道已就绪' : '公网隧道建立中…')
+    }
+    setRemoteStatus('ok', `远程控制已开启（${channels.join(' · ')}）。手机访问上方链接即可，链接已内置访问令牌。`)
+  } else {
+    setRemoteStatus('checking', '远程控制当前关闭。开启下方任一开关后，本面板会生成手机可访问的链接。')
+  }
+}
+
+async function refreshRemote() {
+  if (remoteState.busy) return
+  remoteState.busy = true
+  try {
+    renderRemote(await api.remoteGetState())
+  } catch (error) {
+    showToast(`读取远程控制状态失败：${error.message ?? String(error)}`, true)
+  } finally {
+    remoteState.busy = false
+  }
+}
+
+async function toggleRemoteLan(enabled) {
+  try {
+    const snapshot = await api.remoteSetLan(enabled)
+    if (snapshot === null) throw new Error('远程控制服务尚未就绪')
+    renderRemote(snapshot)
+    showToast(enabled ? '局域网访问已开启' : '局域网访问已关闭')
+  } catch (error) {
+    showToast(`操作失败：${error.message ?? String(error)}`, true)
+    await refreshRemote()
+  }
+}
+
+async function toggleRemotePublic(enabled) {
+  try {
+    const snapshot = await api.remoteSetPublic(enabled)
+    if (snapshot === null) throw new Error('远程控制服务尚未就绪')
+    renderRemote(snapshot)
+    showToast(enabled ? '公网访问已开启，正在建立隧道…' : '公网访问已关闭')
+  } catch (error) {
+    showToast(`操作失败：${error.message ?? String(error)}`, true)
+    await refreshRemote()
+  }
+}
+
+async function resetRemoteToken() {
+  try {
+    const snapshot = await api.remoteResetToken()
+    if (snapshot === null) throw new Error('远程控制服务尚未就绪')
+    renderRemote(snapshot)
+    showToast('令牌已重置，所有旧链接已立即失效')
+  } catch (error) {
+    showToast(`重置令牌失败：${error.message ?? String(error)}`, true)
+  }
+}
+
+async function changeRemotePort() {
+  const input = $('remote-port')
+  const value = Number(input.value)
+  if (!Number.isInteger(value) || value < 1024 || value > 65535) {
+    input.value = String(remoteState.snapshot?.port ?? '')
+    showToast('端口需为 1024–65535 之间的整数', true)
+    return
+  }
+  try {
+    const snapshot = await api.remoteSetPort(value)
+    if (snapshot === null) throw new Error('远程控制服务尚未就绪')
+    renderRemote(snapshot)
+    showToast(`端口已改为 ${snapshot.port}，链接已更新`)
+  } catch (error) {
+    showToast(`修改端口失败：${error.message ?? String(error)}`, true)
+    await refreshRemote()
+  }
+}
+
+function wireRemotePanel() {
+  $('remote-lan-enabled').addEventListener('change', (event) => { void toggleRemoteLan(event.target.checked) })
+  $('remote-public-enabled').addEventListener('change', (event) => { void toggleRemotePublic(event.target.checked) })
+  $('remote-reset-token').addEventListener('click', () => { void resetRemoteToken() })
+  $('remote-refresh').addEventListener('click', () => { void refreshRemote() })
+  $('remote-port').addEventListener('change', () => { void changeRemotePort() })
+  api.onRemoteState((snapshot) => renderRemote(snapshot))
+}
+
 // ---------- wiring ----------
 
 function wireChrome() {
@@ -838,6 +1021,7 @@ function wire() {
   wireUpdatePanel()
   wireVisionPanel()
   wireArchivePanel()
+  wireRemotePanel()
   $('refresh-scan').addEventListener('click', refreshAll)
   $('choose-sessions-dir').addEventListener('click', async () => {
     const config = await api.chooseSessionsRoot()

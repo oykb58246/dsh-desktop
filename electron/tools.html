@@ -47,6 +47,13 @@
             <small>对准官方仓库基线</small>
           </span>
         </button>
+        <button class="tool-rail__item" data-tool="remote-control">
+          <span class="tool-rail__icon" aria-hidden="true">⇄</span>
+          <span class="tool-rail__copy">
+            <strong>Web 远程控制</strong>
+            <small>手机浏览器访问本机</small>
+          </span>
+        </button>
       </nav>
 
       <main class="tool-stage" id="codex-import">
@@ -256,6 +263,58 @@
             <div class="empty-note">加载中…</div>
           </div>
         </div>
+      </main>
+
+      <main class="tool-stage" id="remote-control" hidden>
+        <div class="stage-heading">
+          <div>
+            <p class="eyebrow">REMOTE WEB ACCESS</p>
+            <h1>Web 远程控制</h1>
+          </div>
+          <div class="stage-heading__actions">
+            <button class="button button--secondary" id="remote-refresh" type="button">↻ 刷新链接</button>
+          </div>
+        </div>
+
+        <p class="remote-intro">开启后，手机浏览器访问下方链接即可同步查看和操作本机的 DSH。链接已内置访问令牌，请勿把链接转发给他人。</p>
+
+        <div class="remote-section">
+          <label class="vision-switch" id="remote-lan-switch-row">
+            <input type="checkbox" id="remote-lan-enabled" />
+            <span class="vision-switch__copy">
+              <strong>局域网访问</strong>
+              <small>手机与电脑连接同一 Wi-Fi 或热点时可用。首次开启时若 Windows 弹出防火墙提示，请勾选「专用网络」并允许访问。</small>
+            </span>
+          </label>
+          <div class="remote-links" id="remote-lan-links" hidden></div>
+        </div>
+
+        <div class="remote-section">
+          <label class="vision-switch" id="remote-public-switch-row">
+            <input type="checkbox" id="remote-public-enabled" />
+            <span class="vision-switch__copy">
+              <strong>公网访问（Cloudflare 隧道）</strong>
+              <small>手机在任何网络（含 4G/5G）都能访问。免费隧道链接在每次启动时变化，可在本面板点击「刷新链接」重新获取。</small>
+            </span>
+          </label>
+          <div class="remote-links" id="remote-public-links" hidden></div>
+        </div>
+
+        <div class="remote-section">
+          <p class="section-label">ACCESS TOKEN</p>
+          <div class="done-card">
+            <div class="done-card__line"><b>访问令牌：</b><code id="remote-token">—</code></div>
+            <div class="done-card__line">令牌已内置于下方链接。点击「重置令牌」后所有旧链接立即失效，需重新复制新链接。</div>
+            <div class="remote-token-actions">
+              <button class="button button--secondary" id="remote-reset-token" type="button">重置令牌</button>
+              <label class="remote-port-label">端口
+                <input class="tools-input tools-input--port" id="remote-port" type="number" min="1024" max="65535" spellcheck="false" title="局域网访问端口（修改后需重新开启开关）" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="update-status" id="remote-status" role="status" aria-live="polite"></div>
       </main>
     </div>
 

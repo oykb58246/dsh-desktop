@@ -114,7 +114,9 @@ export function ReasoningEffortsField(props: ReasoningEffortsFieldProps): ReactN
                 onChange={() => { toggle(level) }}
               />
               <span className={styles['reasoningName']}>{t(`effort.${level}` as keyof typeof en)}</span>
-              <span className={styles['reasoningWire']}>{level === 'off' ? t('reasoningOffWire') : level}</span>
+              {level === 'off'
+                ? <span className={styles['reasoningWire']}>{t('reasoningOffWire')}</span>
+                : null}
             </label>
           ))}
         </div>

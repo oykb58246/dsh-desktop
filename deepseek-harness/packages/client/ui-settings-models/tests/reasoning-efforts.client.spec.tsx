@@ -40,11 +40,23 @@ describe('ReasoningEffortsField', () => {
     render(<ReasoningEffortsField levels={undefined} onChange={onChange} t={t} disabled={false} />)
     expect(screen.getByRole('button', { name: /未设置/ })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /未设置/ }))
-    expect(screen.getByRole('checkbox', { name: /关闭/ })).toBeTruthy()
-    expect(screen.getByRole('checkbox', { name: /超高/ })).toBeTruthy()
-    expect(screen.getByRole('checkbox', { name: /最大/ })).toBeTruthy()
+    expect(screen.getByRole('checkbox', { name: /^off/ })).toBeTruthy()
+    expect(screen.getByRole('checkbox', { name: 'xhigh' })).toBeTruthy()
+    expect(screen.getByRole('checkbox', { name: 'max' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '全选' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '清空' })).toBeTruthy()
+  })
+
+  it('labels each level once instead of repeating the wire spelling', () => {
+    render(<ReasoningEffortsField levels={undefined} onChange={vi.fn()} t={t} disabled={false} />)
+    fireEvent.click(screen.getByRole('button', { name: /未设置/ }))
+    expect(screen.getByRole('checkbox', { name: 'low' })).toBeTruthy()
+    expect(screen.getByRole('checkbox', { name: 'minimal' })).toBeTruthy()
+    expect(screen.getByRole('checkbox', { name: 'medium' })).toBeTruthy()
+    expect(screen.getByRole('checkbox', { name: 'high' })).toBeTruthy()
+    expect(screen.queryByRole('checkbox', { name: /lowlow|minimalminimal|mediummedium|highhigh|xhighxhigh|maxmax/ })).toBeNull()
+    expect(screen.getByRole('checkbox', { name: /^off/ }).closest('label')?.textContent)
+      .toMatch(/off\s*不发送参数/)
   })
 
   it('ticking one level writes the wire dict and keeps the summary in sync', () => {
@@ -56,7 +68,7 @@ describe('ReasoningEffortsField', () => {
       disabled={false}
     />)
     fireEvent.click(screen.getByRole('button', { name: /已选 1 档/ }))
-    fireEvent.click(screen.getByRole('checkbox', { name: /低/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'low' }))
     expect(onChange).toHaveBeenCalledWith({ off: null, low: 'low' })
   })
 
@@ -87,7 +99,7 @@ describe('ReasoningEffortsField', () => {
       disabled={false}
     />)
     fireEvent.click(screen.getByRole('button', { name: /已选 1 档/ }))
-    fireEvent.click(screen.getByRole('checkbox', { name: /关闭/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /^off/ }))
     expect(onChange).toHaveBeenCalledWith(undefined)
   })
 

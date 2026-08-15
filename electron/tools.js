@@ -510,7 +510,7 @@ function renderUpdateInfo(info) {
   } else if (info.updateAvailable !== true) {
     $('update-latest-version').textContent = `v${latest.version}`
     $('update-latest-meta').textContent = latestMeta(latest)
-    setUpdateStatus('ok', `已是最新版本：当前 v${info.current}，与官方基线 v${latest.version} 一致。`)
+    setUpdateStatus('ok', `已是最新版本：当前 v${info.current}，与官方基线 v${latest.version} 一致。如需重装当前版本，可点击「强制覆盖更新」。`)
   } else {
     $('update-latest-version').textContent = `v${latest.version}`
     $('update-latest-meta').textContent = latestMeta(latest)
@@ -543,7 +543,12 @@ function renderUpdateInfo(info) {
     $('update-progress-box').hidden = true
     $('update-cancel').hidden = true
     $('update-apply').hidden = true
-    $('update-now').hidden = info.updateAvailable !== true || info.downloading === true
+    // The download button doubles as the force-reinstall entry: visible
+    // whenever a baseline exists, relabeled when the version already matches.
+    $('update-now').hidden = latest === null || info.downloading === true
+    $('update-now').innerHTML = info.updateAvailable === true
+      ? '立即更新 <span>→</span>'
+      : '强制覆盖更新 <span>→</span>'
     if (info.downloadError) setUpdateStatus('error', `下载失败：${info.downloadError}`)
   }
 

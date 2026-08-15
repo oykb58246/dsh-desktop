@@ -1,7 +1,7 @@
-// DSH Desktop â€” fully native Go installer.
+// DSH Desktop — fully native Go installer.
 //
 // A single executable that opens its window INSTANTLY (native Win32), walks
-// é€‰æ‹©ç›®å½• â†’ å®‰è£…è¿›åº¦ â†’ å®Œæˆ(å¯é€‰å¯åŠ¨), and only on "å®‰è£…" extracts the
+// 选择目录 → 安装进度 → 完成(可选启动), and only on "安装" extracts the
 // bundled data (appended shell + runtime containers produced by
 // scripts/append-payload.mjs) straight into the chosen directory.
 //
@@ -225,21 +225,21 @@ func colref(r, g, b uint8) uintptr {
 }
 
 var (
-	colPrimary  = colref(0x4D, 0x6B, 0xFE) // #4D6BFE å“ç‰Œè“
-	colGhost    = colref(0x30, 0x4A, 0x78) // #304A78 æ¬¡æŒ‰é’®æ·±è“
-	colBorder   = colref(0x7F, 0x9D, 0xF0) // #7F9DF0 æµ…è“æè¾¹
-	colHeading  = colref(0xF2, 0xF6, 0xFF) // #F2F6FF æ ‡é¢˜ç™½
-	colTitleBar = colref(0xEE, 0xF3, 0xFF) // #EEF3FF æ ‡é¢˜æ æ–‡å­—
-	colBody     = colref(0xB1, 0xCE, 0xEF) // #B1CEEF æ­£æ–‡æµ…è“
-	colStatus   = colref(0xB2, 0xD7, 0xEE) // #B2D7EE çŠ¶æ€æµ…è“
-	colMuted    = colref(0x7D, 0x97, 0xC4) // #7D97C4 å¼±åŒ–æ–‡å­—
-	colGreen    = colref(0x34, 0xD3, 0x99) // #34D399 æˆåŠŸç»¿
+	colPrimary  = colref(0x4D, 0x6B, 0xFE) // #4D6BFE 品牌蓝
+	colGhost    = colref(0x30, 0x4A, 0x78) // #304A78 次按钮深蓝
+	colBorder   = colref(0x7F, 0x9D, 0xF0) // #7F9DF0 浅蓝描边
+	colHeading  = colref(0xF2, 0xF6, 0xFF) // #F2F6FF 标题白
+	colTitleBar = colref(0xEE, 0xF3, 0xFF) // #EEF3FF 标题栏文字
+	colBody     = colref(0xB1, 0xCE, 0xEF) // #B1CEEF 正文浅蓝
+	colStatus   = colref(0xB2, 0xD7, 0xEE) // #B2D7EE 状态浅蓝
+	colMuted    = colref(0x7D, 0x97, 0xC4) // #7D97C4 弱化文字
+	colGreen    = colref(0x34, 0xD3, 0x99) // #34D399 成功绿
 	colWhite    = colref(0xFF, 0xFF, 0xFF)
-	colPanel    = colref(0x0C, 0x1F, 0x42) // #0C1F42 é¢æ¿æ·±è“
-	colEditBg   = colref(0x0A, 0x1A, 0x3A) // #0A1A3A è¾“å…¥æ¡†æ·±è“
-	colTrack    = colref(0x1E, 0x3A, 0x6E) // #1E3A6E è¿›åº¦æ¡åº•
-	colGlyph    = colref(0xCF, 0xE2, 0xFF) // #CFE2FF æ ‡é¢˜æ æŒ‰é’®
-	colLabel    = colref(0xDB, 0xE9, 0xFF) // #DBE9FF å¤é€‰æ ‡ç­¾
+	colPanel    = colref(0x0C, 0x1F, 0x42) // #0C1F42 面板深蓝
+	colEditBg   = colref(0x0A, 0x1A, 0x3A) // #0A1A3A 输入框深蓝
+	colTrack    = colref(0x1E, 0x3A, 0x6E) // #1E3A6E 进度条底
+	colGlyph    = colref(0xCF, 0xE2, 0xFF) // #CFE2FF 标题栏按钮
+	colLabel    = colref(0xDB, 0xE9, 0xFF) // #DBE9FF 复选标签
 )
 
 type pageID int
@@ -283,8 +283,8 @@ var (
 
 	// Page headings differ between a fresh install and a self-update
 	// (runWorkerMode switches these before the progress page appears).
-	progressHeading = "æ­£åœ¨å®‰è£…"
-	doneHeading     = "å®‰è£…å®Œæˆ"
+	progressHeading = "正在安装"
+	doneHeading     = "安装完成"
 
 	installSizeBytes int64
 
@@ -448,14 +448,14 @@ func drawButton(dc uintptr, b button) {
 func drawTitleBar(dc uintptr) {
 	drawText(dc, "DSH Desktop", rect{48, 0, 320, barH}, colTitleBar, 14, true, DT_SINGLELINE|DT_VCENTER)
 	// Window buttons share one visual footprint: the minimize bar is drawn as
-	// a 12x2 vector (matching the âœ•'s ~11px width) so it is pixel-exact and
-	// centered, unlike the old 16px "â€”" vs 14px "âœ•" text pair whose metrics
-	// never lined up. The close âœ• stays a 15px glyph.
+	// a 12x2 vector (matching the ✕'s ~11px width) so it is pixel-exact and
+	// centered, unlike the old 16px "—" vs 14px "✕" text pair whose metrics
+	// never lined up. The close ✕ stays a 15px glyph.
 	bar := rect{minBtn.left + 15, barH/2 - 1, minBtn.left + 27, barH/2 + 1}
 	brush, _, _ := procCreateSolidBrush.Call(colGlyph)
 	procFillRect.Call(dc, uintptr(unsafe.Pointer(&bar)), brush)
 	procDeleteObject.Call(brush)
-	drawText(dc, "âœ•", rect{closeBtn.left, 0, closeBtn.right, barH}, colGlyph, 15, false, DT_CENTER|DT_VCENTER|DT_SINGLELINE)
+	drawText(dc, "✕", rect{closeBtn.left, 0, closeBtn.right, barH}, colGlyph, 15, false, DT_CENTER|DT_VCENTER|DT_SINGLELINE)
 }
 
 func paintAll() {
@@ -474,14 +474,14 @@ func paintAll() {
 
 	switch current {
 	case pageDir:
-		drawText(offDC, "é€‰æ‹©å®‰è£…ç›®å½•", rect{70, 78, winW - 70, 122}, colHeading, 24, true, DT_CENTER)
-		drawText(offDC, "åº”ç”¨ä¸Žè¿è¡Œæ—¶å°†å®‰è£…åˆ°æ‰€é€‰ç›®å½•ï¼Œæ•°æ®ç›´æŽ¥ä»Žå®‰è£…å™¨è§£åŽ‹ã€‚", rect{70, 132, winW - 70, 158}, colBody, 13, false, DT_CENTER)
+		drawText(offDC, "选择安装目录", rect{70, 78, winW - 70, 122}, colHeading, 24, true, DT_CENTER)
+		drawText(offDC, "应用与运行时将安装到所选目录，数据直接从安装器解压。", rect{70, 132, winW - 70, 158}, colBody, 13, false, DT_CENTER)
 		// Input row (vertically centered in the content area below the title bar).
 		panel := rect{90, 232, 570, 268}
 		procFillRect.Call(offDC, uintptr(unsafe.Pointer(&panel)), editBrush)
-		cap := "æœ¬æ¬¡å®‰è£…çº¦éœ€ " + fmtBytes(uint64(installSizeBytes))
+		cap := "本次安装约需 " + fmtBytes(uint64(installSizeBytes))
 		if free := freeBytes(installDir); free > 0 {
-			cap += "ã€€Â·ã€€ç›®æ ‡ç›˜å‰©ä½™ " + fmtBytes(free)
+			cap += "　·　目标盘剩余 " + fmtBytes(free)
 		}
 		drawText(offDC, cap, rect{70, 440, winW - 70, 466}, colMuted, 12, false, DT_CENTER)
 		for _, b := range buttons {
@@ -489,7 +489,7 @@ func paintAll() {
 		}
 	case pageProgress:
 		drawText(offDC, progressHeading, rect{70, 84, winW - 70, 130}, colHeading, 24, true, DT_CENTER)
-		drawText(offDC, "å®‰è£…åˆ°ï¼š"+installDir, rect{70, 134, winW - 70, 164}, colBody, 12, false, DT_CENTER|DT_WORDBREAK)
+		drawText(offDC, "安装到："+installDir, rect{70, 134, winW - 70, 164}, colBody, 12, false, DT_CENTER|DT_WORDBREAK)
 		bar := rect{70, 210, winW - 70, 224}
 		track, _, _ := procCreateSolidBrush.Call(colTrack)
 		procFillRect.Call(offDC, uintptr(unsafe.Pointer(&bar)), track)
@@ -507,7 +507,7 @@ func paintAll() {
 		drawText(offDC, fmt.Sprintf("%d%%", pct), rect{70, 236, winW - 70, 280}, colHeading, 28, true, DT_CENTER)
 		drawText(offDC, statusText, rect{70, 286, winW - 70, 318}, colStatus, 12, false, DT_CENTER)
 	case pageDone:
-		drawText(offDC, "âœ“", rect{0, 84, winW, 160}, colGreen, 40, true, DT_CENTER)
+		drawText(offDC, "✓", rect{0, 84, winW, 160}, colGreen, 40, true, DT_CENTER)
 		drawText(offDC, doneHeading, rect{70, 168, winW - 70, 214}, colHeading, 24, true, DT_CENTER)
 		drawText(offDC, doneText, rect{70, 222, winW - 70, 254}, colBody, 13, false, DT_CENTER)
 		box := rect{270, 296, 288, 314}
@@ -515,9 +515,9 @@ func paintAll() {
 		procFillRect.Call(offDC, uintptr(unsafe.Pointer(&box)), boxBrush)
 		procDeleteObject.Call(boxBrush)
 		if launchChecked {
-			drawText(offDC, "âœ“", rect{270, 292, 288, 318}, colWhite, 14, true, DT_CENTER|DT_VCENTER|DT_SINGLELINE)
+			drawText(offDC, "✓", rect{270, 292, 288, 318}, colWhite, 14, true, DT_CENTER|DT_VCENTER|DT_SINGLELINE)
 		}
-		drawText(offDC, "å¯åŠ¨ DSH Desktop", rect{298, 292, 520, 318}, colLabel, 13, false, DT_SINGLELINE|DT_VCENTER)
+		drawText(offDC, "启动 DSH Desktop", rect{298, 292, 520, 318}, colLabel, 13, false, DT_SINGLELINE|DT_VCENTER)
 		for _, b := range buttons {
 			drawButton(offDC, b)
 		}
@@ -622,7 +622,7 @@ func createEditControl(hInst uintptr) uintptr {
 	if edit != 0 {
 		uiFont = makeFont(15, false)
 		procSendMessage.Call(edit, WM_SETFONT, uiFont, 1)
-		// å­ç±»åŒ– EDITï¼ŒæŽ¥ç®¡ WM_PAINT è‡ªè¡Œç»˜åˆ¶æ–‡å­—ï¼Œå®žçŽ°ç²¾ç¡®åž‚ç›´å±…ä¸­ã€‚
+		// 子类化 EDIT，接管 WM_PAINT 自行绘制文字，实现精确垂直居中。
 		editWndProc, _, _ = procSetWindowLongPtrW.Call(edit, ^uintptr(3), syscall.NewCallback(editSubclassProc))
 	}
 	return edit
@@ -874,7 +874,7 @@ func installTo(target string) error {
 		// initialization phase below, so the bar visibly holds at 99% while
 		// the app tree is warmed and registered.
 		progressPct = float64(done) / float64(total) * 0.99
-		statusText = fmt.Sprintf("%d/%d Â· %s", done, total, name)
+		statusText = fmt.Sprintf("%d/%d · %s", done, total, name)
 		paintAll()
 	}
 	warmDone := make(chan struct{})
@@ -895,10 +895,10 @@ func installTo(target string) error {
 		warmQueue <- dest
 		report(fe.Path)
 	}
-	// Files are copied (99%): finish initializing off-screen â€” drain the
+	// Files are copied (99%): finish initializing off-screen — drain the
 	// warm-up read-back (OS cache + antivirus scan of the fresh tree), then
-	// the registry/shortcuts/Defender steps â€” before declaring completion.
-	statusText = "æ­£åœ¨åˆå§‹åŒ–åº”ç”¨â€¦"
+	// the registry/shortcuts/Defender steps — before declaring completion.
+	statusText = "正在初始化应用…"
 	paintAll()
 	close(warmQueue)
 	<-warmDone
@@ -957,7 +957,7 @@ func isElevated() bool {
 // relaunchElevated restarts the installer through the UAC prompt (runas verb),
 // passing the given arguments. Returns true when an elevated copy was started
 // (the caller should then quit); false when the user cancelled the prompt or
-// the launch failed (the caller may proceed with a normal token â€” extraction
+// the launch failed (the caller may proceed with a normal token — extraction
 // works, only the privileged post-steps degrade).
 func relaunchElevated(args ...string) bool {
 	exe, err := os.Executable()
@@ -1082,7 +1082,7 @@ func killProcesses(pids []int) {
 // ---------- install-time file warm-up ----------
 
 // warmQueue receives fully written install files to read back into the OS
-// cache â€” and through the antivirus scanner â€” while extraction is still
+// cache — and through the antivirus scanner — while extraction is still
 // running. The first launch then finds scanned, cached files instead of
 // paying the cold read + scan cost on screen.
 var warmQueue = make(chan string, 1024)
@@ -1138,7 +1138,7 @@ func browseDir() {
 	bi := browseInfo{
 		hwndOwner:      hwnd,
 		pszDisplayName: &buf[0],
-		lpszTitle:      utf16Ptr("é€‰æ‹©å®‰è£…ç›®å½•"),
+		lpszTitle:      utf16Ptr("选择安装目录"),
 		ulFlags:        BIF_NEWDIALOGSTYLE | BIF_RETURNONLYFSDIR,
 	}
 	pidl, _, _ := procSHBrowseForFolder.Call(uintptr(unsafe.Pointer(&bi)))
@@ -1159,8 +1159,8 @@ func browseDir() {
 
 func showDirPage() {
 	setPage(pageDir, []button{
-		{x: 570, y: 232, w: 100, h: 36, label: "æµè§ˆâ€¦", primary: false, click: browseDir},
-		{x: 590, y: 386, w: 130, h: 44, label: "å®‰è£…", primary: true, click: startInstall},
+		{x: 570, y: 232, w: 100, h: 36, label: "浏览…", primary: false, click: browseDir},
+		{x: 590, y: 386, w: 130, h: 44, label: "安装", primary: true, click: startInstall},
 	})
 }
 
@@ -1188,11 +1188,11 @@ func startInstall() {
 	// Installing over a running app would fail on locked files: ask the user
 	// before terminating any DSH Desktop processes under the target.
 	if pids := runningUnder(installDir); len(pids) > 0 {
-		msg := fmt.Sprintf("æ£€æµ‹åˆ° %d ä¸ª DSH Desktop è¿›ç¨‹æ­£åœ¨è¿è¡Œï¼ˆå®‰è£…ç›®å½•ï¼š%sï¼‰ã€‚\n\n"+
-			"ç‚¹å‡»ã€Œæ˜¯ã€å°†ç«‹å³ç»ˆæ­¢è¿™ %d ä¸ªè¿›ç¨‹å¹¶ç»§ç»­å®‰è£…ï¼Œæœªä¿å­˜çš„ä¼šè¯æ•°æ®å¯èƒ½ä¸¢å¤±ã€‚\n"+
-			"ç‚¹å‡»ã€Œå¦ã€å°†å–æ¶ˆæœ¬æ¬¡å®‰è£…ï¼Œè¯·å…ˆæ‰‹åŠ¨å…³é—­ DSH Desktop åŽå†è¯•ã€‚",
+		msg := fmt.Sprintf("检测到 %d 个 DSH Desktop 进程正在运行（安装目录：%s）。\n\n"+
+			"点击「是」将立即终止这 %d 个进程并继续安装，未保存的会话数据可能丢失。\n"+
+			"点击「否」将取消本次安装，请先手动关闭 DSH Desktop 后再试。",
 			len(pids), installDir, len(pids))
-		r, _, _ := procMessageBoxW.Call(hwnd, uintptr(unsafe.Pointer(utf16Ptr("DSH Desktop å®‰è£…"))), uintptr(unsafe.Pointer(utf16Ptr(msg))), mbYesNo|mbIconWarning|mbDefButton2)
+		r, _, _ := procMessageBoxW.Call(hwnd, uintptr(unsafe.Pointer(utf16Ptr("DSH Desktop 安装"))), uintptr(unsafe.Pointer(utf16Ptr(msg))), mbYesNo|mbIconWarning|mbDefButton2)
 		if r != idYes {
 			installing = false
 			return
@@ -1208,16 +1208,16 @@ func startInstall() {
 		}
 	}
 	progressPct = 0
-	statusText = "å‡†å¤‡å®‰è£…â€¦"
+	statusText = "准备安装…"
 	setPage(pageProgress, nil)
 	go func() {
 		err := installTo(installDir)
 		if err != nil {
 			installing = false
 			doneOk = false
-			doneText = "å®‰è£…å¤±è´¥ï¼š" + err.Error()
+			doneText = "安装失败：" + err.Error()
 			setPage(pageDone, []button{
-				{x: 590, y: 386, w: 130, h: 44, label: "å…³é—­", primary: true, click: func() {
+				{x: 590, y: 386, w: 130, h: 44, label: "关闭", primary: true, click: func() {
 					procPostMessage.Call(hwnd, WM_CLOSE, 0, 0)
 				}},
 			})
@@ -1225,12 +1225,12 @@ func startInstall() {
 		}
 		installing = false
 		doneOk = true
-		doneText = "æ•°æ®å·²å†™å…¥ï¼š" + installDir
+		doneText = "数据已写入：" + installDir
 		progressPct = 1
 		statusText = "100%"
 		paintAll()
 		setPage(pageDone, []button{
-			{x: 590, y: 386, w: 130, h: 44, label: "å®Œæˆ", primary: true, click: finish},
+			{x: 590, y: 386, w: 130, h: 44, label: "完成", primary: true, click: finish},
 		})
 	}()
 }
@@ -1276,7 +1276,7 @@ func setupWindow(img image.Image) bool {
 // the built-in updater (electron/updater.mjs) downloads the new setup exe and
 // runs it elevated with `--installer-worker <dir> [--relaunch]`. The overlay
 // install takes tens of seconds (440 MB + warm-up), so it must NOT run
-// silently â€” the user watches the same progress page as a fresh install, and
+// silently — the user watches the same progress page as a fresh install, and
 // on completion the app relaunches (--relaunch) and the window closes itself.
 func runWorkerMode(target string, relaunch bool) {
 	img, _, err := image.Decode(bytes.NewReader(bgPng))
@@ -1288,9 +1288,9 @@ func runWorkerMode(target string, relaunch bool) {
 		return
 	}
 	installDir = target
-	progressHeading = "æ­£åœ¨æ›´æ–°"
-	doneHeading = "æ›´æ–°å®Œæˆ"
-	statusText = "å‡†å¤‡æ›´æ–°â€¦"
+	progressHeading = "正在更新"
+	doneHeading = "更新完成"
+	statusText = "准备更新…"
 	setPage(pageProgress, nil)
 	procShowWindow.Call(hwnd, SW_SHOW)
 	procUpdateWindow.Call(hwnd)
@@ -1298,21 +1298,21 @@ func runWorkerMode(target string, relaunch bool) {
 		err := installTo(target)
 		if err != nil {
 			doneOk = false
-			doneText = "æ›´æ–°å¤±è´¥ï¼š" + err.Error()
+			doneText = "更新失败：" + err.Error()
 			fmt.Fprintln(os.Stderr, "installer worker failed:", err)
 			if log, openErr := os.OpenFile(`C:\dsh-desktop-install.log`, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); openErr == nil {
 				log.WriteString(time.Now().Format("2006-01-02 15:04:05") + " | error | worker: " + err.Error() + "\n")
 				log.Close()
 			}
 			setPage(pageDone, []button{
-				{x: 590, y: 386, w: 130, h: 44, label: "å…³é—­", primary: true, click: func() {
+				{x: 590, y: 386, w: 130, h: 44, label: "关闭", primary: true, click: func() {
 					procPostMessage.Call(hwnd, WM_CLOSE, 0, 0)
 				}},
 			})
 			return
 		}
 		doneOk = true
-		doneText = "æ›´æ–°å®Œæˆï¼š" + target
+		doneText = "更新完成：" + target
 		if relaunch {
 			installedExe := filepath.Join(target, "DSH Desktop.exe")
 			if _, statErr := os.Stat(installedExe); statErr == nil {

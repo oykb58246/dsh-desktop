@@ -20,7 +20,7 @@
       .view { position: absolute; inset: 46px 0 0; z-index: 10; display: none; flex-direction: column; padding: 34px 38px 26px; }
       .view.active { display: flex; }
       .steps { display: flex; gap: 8px; margin-bottom: 22px; }
-      .steps .dot { width: 22px; height: 4px; border-radius: 2px; background: rgba(143,186,255,.25); }
+      .steps .dot { width: 28px; height: 4px; border-radius: 2px; background: rgba(143,186,255,.25); }
       .steps .dot.on { background: var(--brand); }
       .big { width: 88px; height: 88px; object-fit: contain; filter: drop-shadow(0 12px 18px rgba(7,29,88,.5)); }
       h1 { margin: 18px 0 8px; font-size: 24px; letter-spacing: -.01em; }
@@ -54,31 +54,21 @@
         <button class="close" data-act="close" title="关闭">&#10005;</button>
       </div>
 
-      <section class="view active" id="view-welcome">
-        <div class="steps"><i class="dot on"></i><i class="dot"></i><i class="dot"></i><i class="dot"></i></div>
-        <img class="big" src="../website/assets/favicon.svg" alt="" />
-        <h1 data-i18n="welcomeTitle">安装 DSH Desktop</h1>
-        <p data-i18n="welcomeBody">本地运行的 DeepSeek Harness 智能体环境。<br/>安装完成后即可直接使用，全程离线。</p>
-        <p class="hint" data-i18n="welcomeHint">将安装到：<b id="welcomePath" style="color:#dbe9ff"></b></p>
-        <div class="foot"><button class="primary" id="btnWelcomeNext" data-i18n="next">下一步</button></div>
-      </section>
-
-      <section class="view" id="view-dir">
-        <div class="steps"><i class="dot on"></i><i class="dot on"></i><i class="dot"></i><i class="dot"></i></div>
+      <section class="view active" id="view-dir">
+        <div class="steps"><i class="dot on"></i><i class="dot"></i><i class="dot"></i></div>
         <h1 style="margin-top:34px" data-i18n="dirTitle">选择安装目录</h1>
         <p data-i18n="dirBody">应用与运行时将安装到所选目录。</p>
         <div class="path-row">
           <input id="dirInput" type="text" spellcheck="false" />
           <button class="ghost" id="btnBrowse" data-i18n="browse">浏览…</button>
         </div>
-        <div class="foot">
-          <button class="ghost" id="btnDirBack" data-i18n="back">上一步</button>
-          <button class="primary" id="btnDirNext" data-i18n="install">安装</button>
-        </div>
+        <p class="hint" id="dirError" style="color:#f09aa6" hidden></p>
+        <p class="hint" data-i18n="dirHint">将安装到：<b id="dirPath" style="color:#dbe9ff"></b></p>
+        <div class="foot"><button class="primary" id="btnDirNext" data-i18n="install">安装</button></div>
       </section>
 
       <section class="view" id="view-install">
-        <div class="steps"><i class="dot on"></i><i class="dot on"></i><i class="dot on"></i><i class="dot"></i></div>
+        <div class="steps"><i class="dot on"></i><i class="dot on"></i><i class="dot"></i></div>
         <h1 style="margin-top:10px" data-i18n="installTitle">正在安装</h1>
         <div class="progress-wrap">
           <div class="progress-head"><span id="pctLabel">0%</span><b id="countLabel">0 个文件</b></div>
@@ -89,18 +79,21 @@
       </section>
 
       <section class="view" id="view-done">
-        <div class="steps"><i class="dot on"></i><i class="dot on"></i><i class="dot on"></i><i class="dot on"></i></div>
+        <div class="steps"><i class="dot on"></i><i class="dot on"></i><i class="dot on"></i></div>
         <div class="done-ico">&#10003;</div>
-        <h1 data-i18n="doneTitle">安装完成</h1>
-        <p data-i18n="doneBody">DSH Desktop 已就绪。</p>
+        <h1 data-i18n="doneTitle">安装成功</h1>
+        <p data-i18n="doneBody">DSH Desktop 已安装完成，现在可以启动程序了。</p>
         <div class="check-row"><input type="checkbox" id="launchCheck" checked /><label for="launchCheck" data-i18n="launch">安装完成后启动 DSH Desktop</label></div>
-        <div class="foot"><button class="primary" id="btnFinish" data-i18n="finish">完成</button></div>
+        <div class="foot">
+          <button class="ghost" id="btnClose" data-i18n="close">关闭</button>
+          <button class="primary" id="btnFinish" data-i18n="launchNow">启动程序</button>
+        </div>
       </section>
     </main>
     <script>
       const $ = (id) => document.getElementById(id)
       const i18n = navigator.language.toLowerCase().startsWith('en')
-        ? { welcomeTitle: 'Install DSH Desktop', welcomeBody: 'Run the DeepSeek Harness agent environment locally.<br/>Fully offline after installation.', welcomeHint: 'Install to: ', next: 'Next', dirTitle: 'Choose installation directory', dirBody: 'The app and its runtime will be installed here.', browse: 'Browse…', back: 'Back', install: 'Install', installTitle: 'Installing', installReady: 'Getting ready…', doneTitle: 'Installation complete', doneBody: 'DSH Desktop is ready.', launch: 'Launch DSH Desktop after install', finish: 'Finish' }
+        ? { dirTitle: 'Choose installation directory', dirBody: 'The app and its runtime will be installed here.', dirHint: 'Install to: ', browse: 'Browse…', install: 'Install', installTitle: 'Installing', installReady: 'Getting ready…', doneTitle: 'Installation complete', doneBody: 'DSH Desktop has been installed and is ready to launch.', launch: 'Launch DSH Desktop after install', launchNow: 'Launch Now', close: 'Close' }
         : {}
       const t = (key) => i18n[key] || document.querySelector('[data-i18n="' + key + '"]')?.textContent || key
       const show = (id) => { document.querySelectorAll('.view').forEach(v => v.classList.remove('active')); $(id).classList.add('active') }
@@ -109,29 +102,39 @@
 
       window.dshDesktop.installerDefaults().then((d) => {
         target = d.target
-        $('welcomePath').textContent = target
+        $('dirPath').textContent = target
         $('dirInput').value = target
         $('ver').textContent = 'v' + d.version
         defaultsLoaded = true
       })
 
-      $('btnWelcomeNext').addEventListener('click', () => show('view-dir'))
-      $('btnDirBack').addEventListener('click', () => show('view-welcome'))
       $('btnBrowse').addEventListener('click', async () => {
         const picked = await window.dshDesktop.installerChooseDir()
-        if (picked) { target = picked; $('dirInput').value = picked; $('welcomePath').textContent = picked }
+        if (picked) { target = picked; $('dirInput').value = picked; $('dirPath').textContent = picked }
       })
-      $('dirInput').addEventListener('input', () => { target = $('dirInput').value.trim(); $('welcomePath').textContent = target || '—' })
+      $('dirInput').addEventListener('input', () => { target = $('dirInput').value.trim(); $('dirPath').textContent = target || '—' })
 
       let installTimer = null
       $('btnDirNext').addEventListener('click', async () => {
         if (!target) return
+        const result = await window.dshDesktop.installerStart(target)
+        if (result === 'dev-preview') {
+          $('dirError').hidden = false
+          $('dirError').textContent = '开发预览模式：安装器界面演示，打包后的安装包才会真正执行安装。'
+          return
+        }
+        if (result === 'cancelled') {
+          // The user chose not to stop the running DSH Desktop instances.
+          $('dirError').hidden = false
+          $('dirError').textContent = '已取消：请先退出已安装的 DSH Desktop，再重新点击「安装」。'
+          return
+        }
+        $('dirError').hidden = true
         show('view-install')
         $('barFill').style.width = '0%'
         $('pctLabel').textContent = '0%'
         $('statusLabel').textContent = t('installReady')
         $('logBox').textContent = ''
-        await window.dshDesktop.installerStart(target)
         window._workerAt = Date.now()
         installTimer = setInterval(poll, 250)
       })
@@ -176,8 +179,16 @@
         $('statusLabel').textContent = '完成'
         show('view-done')
       }
+      // The primary button launches the app when the checkbox is ticked; an
+      // unticked checkbox turns it into a plain close so the label stays honest.
+      $('launchCheck').addEventListener('change', () => {
+        $('btnFinish').textContent = $('launchCheck').checked ? t('launchNow') : t('close')
+      })
       $('btnFinish').addEventListener('click', () => {
         window.dshDesktop.installerFinish($('launchCheck').checked)
+      })
+      $('btnClose').addEventListener('click', () => {
+        window.dshDesktop.installerFinish(false)
       })
       document.querySelector('[data-act="close"]').addEventListener('click', () => window.dshDesktop.installerCancel())
     </script>

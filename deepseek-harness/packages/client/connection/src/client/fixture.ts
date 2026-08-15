@@ -1563,6 +1563,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   // Registry-global archive set mirroring the host: archived sessions keep
   // their workspace accounting slot and only grouping surfaces hide them.
   const archivedSessionIds: SessionId[] = []
+  // Registry-global workspace archive set: archived workspaces keep their
+  // records, order, and session accounts; the sidebar list excludes them.
+  const archivedWorkspaceIds: WorkspaceId[] = []
 
   // In-memory browse tree behind the fixture's `browse` picker capability —
   // deterministic content mirroring the design mock so assembled Web tests
@@ -2565,7 +2568,17 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     },
     workspace: {
       list: request => ok(request, {
-        items: workspaces.map(w => ({ ...w })),
+        items: workspaces
+          .filter(w => !archivedWorkspaceIds.includes(w.workspaceId))
+          .map(w => ({ ...w })),
+        archivedSessionIds: [...archivedSessionIds],
+        archivedWorkspaceIds: [...archivedWorkspaceIds],
+      }),
+      listArchived: request => ok(request, {
+        workspaces: archivedWorkspaceIds.flatMap((workspaceId) => {
+          const workspace = workspaces.find(w => w.workspaceId === workspaceId)
+          return workspace === undefined ? [] : [{ ...workspace }]
+        }),
         archivedSessionIds: [...archivedSessionIds],
       }),
       create: (request) => {
@@ -2693,6 +2706,52 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           emitHost({ type: 'host/archived-sessions-changed', archivedSessionIds: [...archivedSessionIds] })
         }
         return ok(request, { archivedSessionIds: [...archivedSessionIds] })
+      },
+      unarchiveSession: (request) => {
+        const { sessionId } = request.payload
+        if (archivedSessionIds.includes(sessionId)) {
+          archivedSessionIds.splice(archivedSessionIds.indexOf(sessionId), 1)
+          emitHost({ type: 'host/archived-sessions-changed', archivedSessionIds: [...archivedSessionIds] })
+        }
+        return ok(request, { archivedSessionIds: [...archivedSessionIds] })
+      },
+      archive: (request) => {
+        const { workspaceId } = request.payload
+        if (!workspaces.some(w => w.workspaceId === workspaceId)) {
+          return err(request, {
+            code: 'workspace-not-found',
+            message: `no workspace ${workspaceId}`,
+            details: { workspaceId },
+          })
+        }
+        if (!archivedWorkspaceIds.includes(workspaceId)) {
+          archivedWorkspaceIds.push(workspaceId)
+          emitHost({ type: 'host/archived-workspaces-changed', archivedWorkspaceIds: [...archivedWorkspaceIds] })
+        }
+        return ok(request, {
+          items: workspaces.filter(w => !archivedWorkspaceIds.includes(w.workspaceId)).map(w => ({ ...w })),
+          archivedSessionIds: [...archivedSessionIds],
+          archivedWorkspaceIds: [...archivedWorkspaceIds],
+        })
+      },
+      unarchive: (request) => {
+        const { workspaceId } = request.payload
+        if (!workspaces.some(w => w.workspaceId === workspaceId)) {
+          return err(request, {
+            code: 'workspace-not-found',
+            message: `no workspace ${workspaceId}`,
+            details: { workspaceId },
+          })
+        }
+        if (archivedWorkspaceIds.includes(workspaceId)) {
+          archivedWorkspaceIds.splice(archivedWorkspaceIds.indexOf(workspaceId), 1)
+          emitHost({ type: 'host/archived-workspaces-changed', archivedWorkspaceIds: [...archivedWorkspaceIds] })
+        }
+        return ok(request, {
+          items: workspaces.filter(w => !archivedWorkspaceIds.includes(w.workspaceId)).map(w => ({ ...w })),
+          archivedSessionIds: [...archivedSessionIds],
+          archivedWorkspaceIds: [...archivedWorkspaceIds],
+        })
       },
     },
     agentPresets: {
@@ -3099,12 +3158,16 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'host.createDirectory': return this.api.host.createDirectory(request)
       case 'host.openPath': return this.api.host.openPath(request, new AbortController().signal)
       case 'workspace.list': return this.api.workspace.list(request)
+      case 'workspace.listArchived': return this.api.workspace.listArchived(request)
       case 'workspace.create': return this.api.workspace.create(request)
       case 'workspace.rename': return this.api.workspace.rename(request)
       case 'workspace.delete': return this.api.workspace.delete(request)
       case 'workspace.insertBefore': return this.api.workspace.insertBefore(request)
       case 'workspace.insertSessionBefore': return this.api.workspace.insertSessionBefore(request)
       case 'workspace.archiveSession': return this.api.workspace.archiveSession(request)
+      case 'workspace.archive': return this.api.workspace.archive(request)
+      case 'workspace.unarchive': return this.api.workspace.unarchive(request)
+      case 'workspace.unarchiveSession': return this.api.workspace.unarchiveSession(request)
       case 'skill.list': return this.api.skills.list(request)
       case 'agentPreset.list': return this.api.agentPresets.list(request)
       case 'agentPreset.select': return this.api.agentPresets.select(request)

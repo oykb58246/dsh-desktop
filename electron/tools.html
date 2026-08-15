@@ -26,25 +26,25 @@
             <small>项目与会话一键导入</small>
           </span>
         </button>
+        <button class="tool-rail__item" data-tool="vision-plugin">
+          <span class="tool-rail__icon" aria-hidden="true">◉</span>
+          <span class="tool-rail__copy">
+            <strong>视觉插件</strong>
+            <small>图片识别 · 默认开启</small>
+          </span>
+        </button>
+        <button class="tool-rail__item" data-tool="archive-manage">
+          <span class="tool-rail__icon" aria-hidden="true">◫</span>
+          <span class="tool-rail__copy">
+            <strong>归档管理</strong>
+            <small>恢复已归档的项目与会话</small>
+          </span>
+        </button>
         <button class="tool-rail__item" data-tool="update-check">
           <span class="tool-rail__icon" aria-hidden="true">⤓</span>
           <span class="tool-rail__copy">
             <strong>检查更新</strong>
             <small>对准官方仓库基线</small>
-          </span>
-        </button>
-        <button class="tool-rail__item is-disabled" data-tool="coming-soon" disabled>
-          <span class="tool-rail__icon" aria-hidden="true">◫</span>
-          <span class="tool-rail__copy">
-            <strong>会话管理</strong>
-            <small>即将推出</small>
-          </span>
-        </button>
-        <button class="tool-rail__item is-disabled" data-tool="coming-soon-2" disabled>
-          <span class="tool-rail__icon" aria-hidden="true">↻</span>
-          <span class="tool-rail__copy">
-            <strong>同步与回收站</strong>
-            <small>即将推出</small>
           </span>
         </button>
       </nav>
@@ -66,12 +66,8 @@
             <button class="button button--secondary button--mini" id="choose-sessions-dir" type="button">自定义</button>
             <button class="button button--secondary button--mini" id="reset-sessions-dir" type="button" disabled>恢复默认</button>
           </div>
-          <div class="config-item">
-            <span class="config-item__label">导入到 Harness</span>
-            <span class="config-item__path" id="target-path">默认目录</span>
-            <button class="button button--secondary button--mini" id="choose-target" type="button">选择目录</button>
-          </div>
         </div>
+        <p class="import-hint">导入不会复制任何文件：每个所选项目会以其原始目录注册为 Harness 工作区，会话内容写入本地会话库。</p>
 
         <div class="stat-grid">
           <div class="stat-card"><span class="stat-card__label">项目</span><strong id="stat-projects">0</strong></div>
@@ -107,7 +103,7 @@
 
         <div class="import-action">
           <span class="import-action__summary" id="selection-summary">未选择任何内容</span>
-          <button class="button button--primary button--wide" id="run-import" type="button" disabled>一键导入所选项目与会话 <span>→</span></button>
+          <button class="button button--primary button--wide" id="run-import" type="button" disabled>引入所选工作区与会话 <span>→</span></button>
         </div>
 
         <div class="progress-box" id="progress-box" hidden>
@@ -161,6 +157,104 @@
           <button class="button button--primary button--wide" id="update-now" type="button" hidden>立即更新 <span>→</span></button>
           <button class="button button--primary button--wide" id="update-apply" type="button" hidden>重启并更新 <span>→</span></button>
           <button class="button button--secondary" id="update-cancel" type="button" hidden>取消下载</button>
+        </div>
+      </main>
+
+      <main class="tool-stage" id="vision-plugin" hidden>
+        <div class="stage-heading">
+          <div>
+            <p class="eyebrow">BUILT-IN QWEN-VL VISION BRIDGE</p>
+            <h1>视觉插件</h1>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-card stat-card--accent">
+            <span class="stat-card__label">插件状态</span>
+            <strong id="vision-status">已开启</strong>
+            <span class="stat-card__meta">内置 · 默认开启</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__label">视觉模型</span>
+            <strong id="vision-model-name">—</strong>
+            <span class="stat-card__meta">Qwen-VL（通义千问）</span>
+          </div>
+        </div>
+
+        <div class="config-strip config-strip--vision">
+          <p class="vision-declare">只要支持 <b>OpenAI 兼容协议</b>（<code>/chat/completions</code>）的视觉模型 API 都可以接入，不限阿里云 DashScope。</p>
+          <label class="vision-switch" id="vision-switch-row">
+            <input type="checkbox" id="vision-enabled" checked />
+            <span class="vision-switch__copy">
+              <strong>启用视觉插件</strong>
+              <small>开启后，聊天中粘贴的图片会由视觉模型转成文字描述，DeepSeek 模型都能直接理解图片内容。</small>
+            </span>
+          </label>
+          <div class="config-item config-item--stacked">
+            <span class="config-item__label">
+              API Key
+              <a class="vision-link" href="#" data-href="https://bailian.console.aliyun.com/">获取 API Key ↗</a>
+            </span>
+            <input class="tools-input" id="vision-apikey" type="password" spellcheck="false" placeholder="sk-…（写入本机 DSH 凭据，仅本地保存，实时生效）" />
+          </div>
+          <div class="config-item config-item--stacked">
+            <span class="config-item__label">视觉模型</span>
+            <input class="tools-input" id="vision-model" type="text" list="vision-model-presets" spellcheck="false" placeholder="输入模型名，或从预设选择" />
+            <datalist id="vision-model-presets">
+              <option value="qwen-vl-max">qwen-vl-max（最强）</option>
+              <option value="qwen-vl-plus">qwen-vl-plus（均衡）</option>
+            </datalist>
+            <small class="vision-hint">可填任意支持 OpenAI 协议的视觉模型名；下拉只列已确认可用的预设，其它模型请手动输入。</small>
+          </div>
+          <div class="config-item config-item--stacked">
+            <span class="config-item__label">API 地址</span>
+            <input class="tools-input" id="vision-baseurl" type="text" spellcheck="false" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
+            <small class="vision-hint">请填写 <b>OpenAI 协议</b> 的地址（以 <code>/compatible-mode/v1</code> 结尾）。在百炼控制台创建接入点时选择「OpenAI 兼容」协议，把生成的地址填到这里。</small>
+          </div>
+          <div class="config-item config-item--stacked">
+            <button class="button button--secondary" id="vision-test" type="button">测试连接</button>
+            <span class="vision-test-status" id="vision-test-status" role="status" aria-live="polite"></span>
+          </div>
+          <button class="button button--primary" id="vision-save" type="button">保存配置</button>
+        </div>
+
+        <div class="vision-note">
+          <p class="section-label">ABOUT / 版权备注</p>
+          <div class="done-card">
+            <div class="done-card__head"><strong>Qwen 视觉能力（Qwen-VL）</strong><span class="badge badge--ok">内置</span></div>
+            <div class="done-card__line">
+              本插件的视觉方案参考
+              <a class="vision-link" href="#" data-href="https://github.com/QwenLM/Qwen-MM-Plugins">QwenLM/Qwen-MM-Plugins</a>
+              的 vision 能力设计（Apache License 2.0），视觉识别由阿里云通义千问 Qwen-VL 模型提供。
+            </div>
+            <div class="done-card__line">© Alibaba Cloud · Qwen Team —— 图片由 Qwen-VL 描述后交回所选 DeepSeek 模型使用；不启用时不产生任何视觉调用。</div>
+          </div>
+        </div>
+      </main>
+
+      <main class="tool-stage" id="archive-manage" hidden>
+        <div class="stage-heading">
+          <div>
+            <p class="eyebrow">ARCHIVE &amp; RESTORE</p>
+            <h1>归档管理</h1>
+          </div>
+          <button class="button button--secondary" id="archive-refresh" type="button">↻ 刷新列表</button>
+        </div>
+
+        <p class="archive-hint">已归档的工作区与会话已从前端隐藏，但数据仍完整保留。可在此恢复。</p>
+
+        <div class="archive-section">
+          <p class="section-label">已归档的工作区（项目）</p>
+          <div class="archive-list" id="archive-workspaces">
+            <div class="empty-note">加载中…</div>
+          </div>
+        </div>
+
+        <div class="archive-section">
+          <p class="section-label">已归档的会话</p>
+          <div class="archive-list" id="archive-sessions">
+            <div class="empty-note">加载中…</div>
+          </div>
         </div>
       </main>
     </div>

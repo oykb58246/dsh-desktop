@@ -21,6 +21,13 @@ export interface WorkspaceListSnapshot {
    * lookups build their own transient Set where they need one.
    */
   archivedSessionIds: readonly SessionId[]
+  /**
+   * Registry-global workspace archive set in Host order: archived
+   * workspaces are hidden whole (their rows never enter `items` here — the
+   * Host list already excludes them), while their registrations, session
+   * accounts, and logs remain for `workspace.listArchived` to expose.
+   */
+  archivedWorkspaceIds: readonly WorkspaceId[]
   state: 'idle' | 'loading' | 'error'
   phase: WorkspaceListPhase
   error: RpcError | null
@@ -39,6 +46,7 @@ export class WorkspaceManager {
   // Full-snapshot state (list response / unary response / changed frame all
   // carry the complete set), so deltas never merge — installs replace.
   private archivedSessionIds: readonly SessionId[] = []
+  private archivedWorkspaceIds: readonly WorkspaceId[] = []
   private state: WorkspaceListSnapshot['state'] = 'idle'
   private phase: WorkspaceListPhase = 'pending'
   private error: RpcError | null = null
@@ -51,6 +59,12 @@ export class WorkspaceManager {
    * mirror of replaying refreshFrames over the item baseline.
    */
   private archivedSupersedesRefresh = false
+  /**
+   * The workspace-archive mirror of {@link archivedSupersedesRefresh}: a
+   * frame or unary echo that installed the workspace archive set while a
+   * list request was in flight outranks that baseline's older set.
+   */
+  private archivedWorkspacesSupersedesRefresh = false
   /** Latest local reorder request; only its unary echo may install order. */
   private orderRequestGeneration = 0
   /** Increments on order frames so a later remote commit outranks an older unary echo. */
@@ -99,6 +113,9 @@ export class WorkspaceManager {
           for (const delta of frames) items = applyWorkspaceDelta(items, delta)
           this.installViews(items)
           if (!this.archivedSupersedesRefresh) this.installArchived(result.value.archivedSessionIds)
+          if (!this.archivedWorkspacesSupersedesRefresh) {
+            this.installArchivedWorkspaces(result.value.archivedWorkspaceIds)
+          }
           this.state = 'idle'
           this.phase = 'ready'
         } else {
@@ -113,6 +130,7 @@ export class WorkspaceManager {
       } finally {
         this.refreshFrames = null
         this.archivedSupersedesRefresh = false
+        this.archivedWorkspacesSupersedesRefresh = false
         this.inflight = null
         this.notifier.markDirty()
       }
@@ -232,6 +250,63 @@ export class WorkspaceManager {
   }
 
   /**
+   * Archive one workspace: the row (and everything grouped under it) leaves
+   * the sidebar while its registration, session account, and logs remain on
+   * the Host. The returned snapshot is installed wholesale — the archived
+   * row drops out of `items` and joins the workspace archive set without
+   * waiting for the changed frame. A remove delta is replayed over any
+   * in-flight baseline so a stale list cannot resurrect the row.
+   * @param workspaceId - workspace to archive.
+   * @returns the wire result.
+   */
+  async archiveWorkspace(
+    workspaceId: WorkspaceId,
+  ): Promise<RpcResult<{ items: WorkspaceView[]; archivedSessionIds: SessionId[]; archivedWorkspaceIds: WorkspaceId[] }>> {
+    const { result } = await this.api.workspace.archive({ workspaceId })
+    if (result.ok) {
+      this.refreshFrames?.push({ type: 'remove', workspaceId })
+      this.installViews(result.value.items)
+      this.installArchived(result.value.archivedSessionIds)
+      this.installArchivedWorkspaces(result.value.archivedWorkspaceIds)
+    }
+    return result
+  }
+
+  /**
+   * Unarchive one workspace: the row reappears in the sidebar at its
+   * original durable-order position. The returned snapshot is installed
+   * wholesale; an upsert delta is replayed over any in-flight baseline so a
+   * stale list cannot drop the restored row.
+   * @param workspaceId - workspace to unarchive.
+   * @returns the wire result.
+   */
+  async unarchiveWorkspace(
+    workspaceId: WorkspaceId,
+  ): Promise<RpcResult<{ items: WorkspaceView[]; archivedSessionIds: SessionId[]; archivedWorkspaceIds: WorkspaceId[] }>> {
+    const { result } = await this.api.workspace.unarchive({ workspaceId })
+    if (result.ok) {
+      const restored = result.value.items.find(workspace => workspace.workspaceId === workspaceId)
+      if (restored !== undefined) this.refreshFrames?.push({ type: 'upsert', workspace: restored })
+      this.installViews(result.value.items)
+      this.installArchived(result.value.archivedSessionIds)
+      this.installArchivedWorkspaces(result.value.archivedWorkspaceIds)
+    }
+    return result
+  }
+
+  /**
+   * Unarchive one session out of the registry-global set, then install the
+   * returned full set without waiting for the changed frame.
+   * @param sessionId - session to unarchive.
+   * @returns the wire result.
+   */
+  async unarchiveSession(sessionId: SessionId): Promise<RpcResult<{ archivedSessionIds: SessionId[] }>> {
+    const { result } = await this.api.workspace.unarchiveSession({ sessionId })
+    if (result.ok) this.installArchived(result.value.archivedSessionIds)
+    return result
+  }
+
+  /**
    * Host-frame entry. Non-workspace frames are ignored so the runtime can
    * fan one host stream out to both object managers.
    * @param envelope - host stream envelope.
@@ -245,6 +320,9 @@ export class WorkspaceManager {
     }
     else if (envelope.payload.type === 'host/archived-sessions-changed') {
       this.installArchived(envelope.payload.archivedSessionIds)
+    }
+    else if (envelope.payload.type === 'host/archived-workspaces-changed') {
+      this.installArchivedWorkspaces(envelope.payload.archivedWorkspaceIds)
     }
   }
 
@@ -275,6 +353,7 @@ export class WorkspaceManager {
     return {
       items: this.itemViews(),
       archivedSessionIds: this.archivedSessionIds,
+      archivedWorkspaceIds: this.archivedWorkspaceIds,
       state: this.state,
       phase: this.phase,
       error: this.error,
@@ -291,6 +370,15 @@ export class WorkspaceManager {
     if (archivedSessionIds.length === this.archivedSessionIds.length
       && archivedSessionIds.every((id, index) => id === this.archivedSessionIds[index])) return
     this.archivedSessionIds = [...archivedSessionIds]
+    this.notifier.markDirty()
+  }
+
+  /** Replace the workspace archive set; same full-snapshot posture as {@link installArchived}. */
+  private installArchivedWorkspaces(archivedWorkspaceIds: readonly WorkspaceId[]): void {
+    if (this.refreshFrames !== null) this.archivedWorkspacesSupersedesRefresh = true
+    if (archivedWorkspaceIds.length === this.archivedWorkspaceIds.length
+      && archivedWorkspaceIds.every((id, index) => id === this.archivedWorkspaceIds[index])) return
+    this.archivedWorkspaceIds = [...archivedWorkspaceIds]
     this.notifier.markDirty()
   }
 
@@ -314,7 +402,9 @@ export class WorkspaceManager {
 
   /** Upsert one Host view, optionally retaining the local object that materialized it. */
   private upsert(view: WorkspaceView, identity?: Workspace): void {
-    if (this.removedIds.has(view.workspaceId)) return
+    // A changed frame for an archived workspace must not resurrect its row:
+    // the workspace archive flag hides the whole group until unarchived.
+    if (this.removedIds.has(view.workspaceId) || this.archivedWorkspaceIds.includes(view.workspaceId)) return
     this.refreshFrames?.push({ type: 'upsert', workspace: view })
     const index = this.items.findIndex(item => item.getSnapshot().view?.workspaceId === view.workspaceId)
     // Mutation responses and changed frames race (two carriers, no ordering):

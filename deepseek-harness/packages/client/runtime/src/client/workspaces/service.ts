@@ -15,13 +15,20 @@ import { WorkspaceManager, type WorkspaceListPhase } from './manager.ts'
 export interface WorkspaceListState {
   items: readonly WorkspaceView[]
   /**
-   * Registry-global archive set in Host order: grouping surfaces hide these
-   * sessions everywhere (workspace groups and the ungrouped bucket) while
-   * their session logs and workspace accounting slots remain. A plain array
-   * (store-engine vocabulary; immer drafts reject Sets) — membership lookups
-   * build their own transient Set.
+   * Registry-global session archive set in Host order: grouping surfaces
+   * hide these sessions everywhere (workspace groups and the ungrouped
+   * bucket) while their session logs and workspace accounting slots remain.
+   * A plain array (store-engine vocabulary; immer drafts reject Sets) —
+   * membership lookups build their own transient Set.
    */
   archivedSessionIds: readonly SessionId[]
+  /**
+   * Registry-global workspace archive set in Host order: archived
+   * workspaces are hidden whole (their rows never enter `items` — the Host
+   * list already excludes them) while their registrations, session
+   * accounts, and logs remain for the Host's restore surface.
+   */
+  archivedWorkspaceIds: readonly WorkspaceId[]
   state: 'idle' | 'loading' | 'error'
   phase: WorkspaceListPhase
   error: RpcError | null
@@ -66,7 +73,7 @@ export class WorkspaceRuntime implements IWorkspaces {
   constructor(ctx: Context, private readonly api: IApiClient, private readonly sessions: SessionsPort) {
     this.manager = new WorkspaceManager(api)
     this.list = createSnapshotStore<WorkspaceListState>({
-      items: [], archivedSessionIds: [], state: 'idle', phase: 'pending', error: null,
+      items: [], archivedSessionIds: [], archivedWorkspaceIds: [], state: 'idle', phase: 'pending', error: null,
       baselinesReady: false, recentWorkspaceId: undefined,
     })
     this.manager.subscribe(() => { this.project() })
@@ -293,6 +300,37 @@ export class WorkspaceRuntime implements IWorkspaces {
   }
 
   /**
+   * Unarchive a session out of the registry-global set: it reappears in its
+   * workspace group (or the Ungrouped bucket) at its original position.
+   * @param sessionId - session to unarchive.
+   */
+  async unarchiveSession(sessionId: SessionId): Promise<void> {
+    const result = await this.manager.unarchiveSession(sessionId)
+    if (!result.ok) throw new Error(`session unarchive failed: ${result.error.code}: ${result.error.message}`)
+  }
+
+  /**
+   * Archive a Workspace: it and everything grouped under it disappear from
+   * the sidebar while its registration, session accounts, and logs remain
+   * (restorable through `unarchiveWorkspace`).
+   * @param workspaceId - workspace to archive.
+   */
+  async archiveWorkspace(workspaceId: WorkspaceId): Promise<void> {
+    const result = await this.manager.archiveWorkspace(workspaceId)
+    if (!result.ok) throw new Error(`workspace archive failed: ${result.error.code}: ${result.error.message}`)
+  }
+
+  /**
+   * Unarchive a Workspace: it reappears in the sidebar at its original
+   * durable-order position, session account intact.
+   * @param workspaceId - workspace to unarchive.
+   */
+  async unarchiveWorkspace(workspaceId: WorkspaceId): Promise<void> {
+    const result = await this.manager.unarchiveWorkspace(workspaceId)
+    if (!result.ok) throw new Error(`workspace unarchive failed: ${result.error.code}: ${result.error.message}`)
+  }
+
+  /**
    * Move a session within its Workspace's manual order (DOM-insertBefore-like).
    * @param workspaceId - owning workspace.
    * @param sessionId - accounted session to move.
@@ -345,6 +383,7 @@ export class WorkspaceRuntime implements IWorkspaces {
     this.list.set({
       items: workspace.items,
       archivedSessionIds: workspace.archivedSessionIds,
+      archivedWorkspaceIds: workspace.archivedWorkspaceIds,
       state: workspace.state,
       phase: workspace.phase,
       error: workspace.error,

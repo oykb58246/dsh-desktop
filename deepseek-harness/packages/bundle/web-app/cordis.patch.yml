@@ -142,6 +142,16 @@
     - id: client-hmr
       name: '@deepseek-ai/dsh-client-hmr'
 
+    # Built-in Qwen-VL vision bridge (modelled on QwenLM/Qwen-MM-Plugins,
+    # Apache-2.0): images pasted into a conversation are described by the
+    # Qwen-VL model so text-only models (DeepSeek V4 Flash/Pro) can read them.
+    # On by default; a later patch layer may set `disabled: true` or
+    # `config.enabled: false` to turn it off. The DashScope key resolves from
+    # the `DASHSCOPE_API_KEY` credential (env, $DSH_HOME/.env, or the web
+    # credentials store).
+    - id: vision-qwen
+      name: '@deepseek-ai/dsh-vision-qwen'
+
     # ── browser plugin roster (dsh.client rows; node halves are layer-2 hosts) ──
 
     # Dual-face: the node half scans this tree, composes window.__DSH_BOOT__,

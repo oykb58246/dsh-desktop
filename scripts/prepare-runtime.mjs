@@ -1,4 +1,5 @@
 import { cp, lstat, mkdir, readdir, readFile, readlink, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 
@@ -117,6 +118,8 @@ async function pruneKernel(dir) {
 const lock = JSON.parse(await readFile(path.join(root, 'upstream.lock.json'), 'utf8'))
 const { name, version, integrity, bin } = lock.kernel
 const spec = `${name}@${version}`
+const harnessRoot = path.join(root, 'deepseek-harness')
+const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 
 console.log(`installing ${spec} into ${stagingRoot}`)
 
@@ -152,6 +155,102 @@ if (!await lstat(path.join(stagingRoot, bin)).then(() => true, () => false)) {
   throw new Error(`the kernel entry point is missing at ${bin}`)
 }
 await rm(path.join(stagingRoot, 'package-lock.json'), { force: true })
+
+// ---------- overlay the locally built harness over the npm kernel ----------
+// The installer ships this repository's own deepseek-harness source (vision
+// bridge, model-settings UI, and every other local change), not the registry
+// snapshot alone: build the workspace, then replace each dsh-* package's lib/
+// in the installed tree with the locally built one. The npm install above
+// still supplies the complete dependency graph (native binaries, third-party
+// deps, the web frontend skeleton), and package.json files keep their pinned
+// versions so the kernel still reports the upstream.lock.json version.
+const corepack = process.platform === 'win32' ? 'corepack.cmd' : 'corepack'
+
+if (!existsSync(path.join(harnessRoot, 'node_modules'))) {
+  console.log('deepseek-harness dependencies missing; installing…')
+  await run(corepack, ['pnpm', 'install', '--dir', harnessRoot], root)
+}
+console.log('building the local deepseek-harness workspace…')
+await run(corepack, ['pnpm', '--dir', harnessRoot, 'run', 'build'], root)
+
+/** Local package directories carrying the built `lib/` of one dsh-* package. */
+async function localPackageDirs() {
+  const dirs = []
+  const groups = await readdir(path.join(harnessRoot, 'packages'), { withFileTypes: true })
+  for (const group of groups) {
+    if (!group.isDirectory()) continue
+    const groupDir = path.join(harnessRoot, 'packages', group.name)
+    for (const pkg of await readdir(groupDir, { withFileTypes: true })) {
+      if (pkg.isDirectory()) dirs.push(path.join(groupDir, pkg.name))
+    }
+  }
+  dirs.push(path.join(harnessRoot, 'apps', 'cli'))
+  return dirs
+}
+
+/** The package name a local directory publishes under, or undefined. */
+async function packageNameOf(dir) {
+  try {
+    const parsed = JSON.parse(await readFile(path.join(dir, 'package.json'), 'utf8'))
+    return typeof parsed?.name === 'string' ? parsed.name : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function overlayLocalBuild() {
+  let overlaid = 0
+  let added = 0
+  for (const dir of await localPackageDirs()) {
+    const pkgName = await packageNameOf(dir)
+    if (pkgName === undefined || !pkgName.startsWith('@deepseek-ai/dsh')) continue
+    const localLib = path.join(dir, 'lib')
+    if (!existsSync(localLib)) continue
+    const installed = path.join(stagingRoot, 'node_modules', pkgName)
+    if (existsSync(path.join(installed, 'lib'))) {
+      // Kernel-shipped package: replace its lib/ with the locally built one.
+      await rm(path.join(installed, 'lib'), { recursive: true, force: true })
+      await copyFollowLinks(localLib, path.join(installed, 'lib'))
+      // The composition manifest (a bundle's cordis.patch.yml) lives at the
+      // package root, not in lib/. Local registrations — the vision bridge
+      // entry among them — must ship too, or the kernel keeps the npm
+      // snapshot's stale manifest and the plugin never loads.
+      for (const extra of ['cordis.patch.yml', 'cordis.yml']) {
+        const extraPath = path.join(dir, extra)
+        if (existsSync(extraPath)) await cp(extraPath, path.join(installed, extra))
+      }
+      overlaid += 1
+    } else if (!existsSync(installed)) {
+      // Package absent from the npm kernel (a workspace-local addition such as
+      // the vision bridge): ship only what runtime resolution needs. The whole
+      // package tree is NOT copied — pnpm's per-package node_modules is full
+      // of workspace symlinks, and following them would recursively copy the
+      // entire workspace.
+      await cp(path.join(dir, 'package.json'), path.join(installed, 'package.json'))
+      await copyFollowLinks(localLib, path.join(installed, 'lib'))
+      for (const extra of ['cordis.patch.yml']) {
+        const extraPath = path.join(dir, extra)
+        if (existsSync(extraPath)) await cp(extraPath, path.join(installed, extra))
+      }
+      added += 1
+    }
+  }
+  // The browser surface: replace the frontend dist with the locally built one.
+  const webName = await packageNameOf(path.join(harnessRoot, 'apps', 'web'))
+  const webDist = path.join(harnessRoot, 'apps', 'web', 'dist')
+  if (webName !== undefined && existsSync(webDist)) {
+    const installedDist = path.join(stagingRoot, 'node_modules', webName, 'dist')
+    await rm(installedDist, { recursive: true, force: true })
+    await copyFollowLinks(webDist, installedDist)
+    overlaid += 1
+  }
+  if (overlaid === 0 && added === 0) {
+    throw new Error('the local harness build produced nothing to overlay; run the deepseek-harness build first')
+  }
+  console.log(`overlaid ${overlaid} existing and added ${added} local packages over the npm kernel`)
+}
+
+await overlayLocalBuild()
 
 // Materialize any links so the packaged runtime works on machines without the
 // build checkout, then drop sources, source maps, documentation and

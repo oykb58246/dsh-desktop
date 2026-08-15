@@ -182,9 +182,9 @@ export class FakeApiClient implements IApiClient {
     openPath: (payload: unknown) => this.record('host.openPath', payload, this.onOpenPath(payload)),
   }
 
-  // The archive-set field defaults at the binding below so list stubs keep
-  // the pre-archive `{ items }` shape; a stub carrying the field wins.
-  onWorkspaceList: (payload: unknown) => Promise<RpcResponse<{ items: never[]; archivedSessionIds?: never[] }>> =
+  // The archive-set fields default at the binding below so list stubs keep
+  // the pre-archive `{ items }` shape; a stub carrying the fields wins.
+  onWorkspaceList: (payload: unknown) => Promise<RpcResponse<{ items: never[]; archivedSessionIds?: never[]; archivedWorkspaceIds?: never[] }>> =
     () => Promise.resolve(ok({ items: [] }))
   onWorkspaceCreate: (payload: unknown) => Promise<RpcResponse<{ workspace: WorkspaceView; created: boolean }>> =
     () => Promise.resolve(ok({ workspace: fakeWorkspace('fk-ws'), created: true }))
@@ -204,12 +204,38 @@ export class FakeApiClient implements IApiClient {
   onWorkspaceArchiveSession: (payload: unknown) => Promise<RpcResponse<{ archivedSessionIds: SessionId[] }>> =
     payload => Promise.resolve(ok({ archivedSessionIds: [(payload as { sessionId: SessionId }).sessionId] }))
 
+  onWorkspaceArchive: (payload: unknown) => Promise<RpcResponse<{
+    items: WorkspaceView[]; archivedSessionIds: SessionId[]; archivedWorkspaceIds: WorkspaceId[]
+  }>> =
+    () => Promise.resolve(ok({ items: [], archivedSessionIds: [], archivedWorkspaceIds: [] }))
+
+  onWorkspaceUnarchive: (payload: unknown) => Promise<RpcResponse<{
+    items: WorkspaceView[]; archivedSessionIds: SessionId[]; archivedWorkspaceIds: WorkspaceId[]
+  }>> =
+    () => Promise.resolve(ok({ items: [], archivedSessionIds: [], archivedWorkspaceIds: [] }))
+
+  onWorkspaceUnarchiveSession: (payload: unknown) => Promise<RpcResponse<{ archivedSessionIds: SessionId[] }>> =
+    () => Promise.resolve(ok({ archivedSessionIds: [] }))
+
+  onWorkspaceListArchived: (payload: unknown) => Promise<RpcResponse<{
+    workspaces: WorkspaceView[]; archivedSessionIds: SessionId[]
+  }>> =
+    () => Promise.resolve(ok({ workspaces: [], archivedSessionIds: [] }))
+
   readonly workspace: IApiClient['workspace'] = {
     list: (payload: unknown) => this.record('workspace.list', payload, this.onWorkspaceList(payload).then(response => (
       response.result.ok
-        ? { ...response, result: { ok: true as const, value: { archivedSessionIds: [] as never[], ...response.result.value } } }
+        ? {
+          ...response,
+          result: {
+            ok: true as const,
+            value: { archivedSessionIds: [] as never[], archivedWorkspaceIds: [] as never[], ...response.result.value },
+          },
+        }
         : response
     )) as ReturnType<IApiClient['workspace']['list']>),
+    listArchived: (payload: unknown) =>
+      this.record('workspace.listArchived', payload, this.onWorkspaceListArchived(payload)),
     create: (payload: unknown) => this.record('workspace.create', payload, this.onWorkspaceCreate(payload)),
     rename: (payload: unknown) => this.record('workspace.rename', payload, this.onWorkspaceRename(payload)),
     delete: (payload: unknown) => this.record('workspace.delete', payload, this.onWorkspaceDelete(payload)),
@@ -219,6 +245,12 @@ export class FakeApiClient implements IApiClient {
       this.record('workspace.insertSessionBefore', payload, this.onWorkspaceInsertSessionBefore(payload)),
     archiveSession: (payload: unknown) =>
       this.record('workspace.archiveSession', payload, this.onWorkspaceArchiveSession(payload)),
+    archive: (payload: unknown) =>
+      this.record('workspace.archive', payload, this.onWorkspaceArchive(payload)),
+    unarchive: (payload: unknown) =>
+      this.record('workspace.unarchive', payload, this.onWorkspaceUnarchive(payload)),
+    unarchiveSession: (payload: unknown) =>
+      this.record('workspace.unarchiveSession', payload, this.onWorkspaceUnarchiveSession(payload)),
   }
 
   // Payloads stay `unknown` (lint-lane note above); response rows are the real

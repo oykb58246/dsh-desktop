@@ -14,6 +14,7 @@ import WorkspaceRegistry, {
   WorkspaceId,
   WorkspaceMoveInvalidError,
   WorkspaceOrderInvalidError,
+  WorkspaceUnknownWorkspaceError,
 } from '../src/index.ts'
 import type { WorkspaceDomainState, WorkspaceRecord } from '../src/index.ts'
 
@@ -140,11 +141,12 @@ function record(path: string, sessionIds: string[], createdAt = '2026-07-24T00:0
 }
 
 /**
- * Media written before archivedSessionIds existed omit the field; keeping the
- * fixtures in that shape continuously proves the schema default upgrades them.
+ * Media written before archivedSessionIds/archivedWorkspaceIds existed omit
+ * the fields; keeping the fixtures in that shape continuously proves the
+ * schema defaults upgrade them.
  */
-type StoredDomainState = Omit<WorkspaceDomainState, 'archivedSessionIds'>
-  & Partial<Pick<WorkspaceDomainState, 'archivedSessionIds'>>
+type StoredDomainState = Omit<WorkspaceDomainState, 'archivedSessionIds' | 'archivedWorkspaceIds'>
+  & Partial<Pick<WorkspaceDomainState, 'archivedSessionIds' | 'archivedWorkspaceIds'>>
 
 function storedPool(
   entries: Array<[string, WorkspaceRecord]>,
@@ -196,7 +198,7 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
     await fiber.await()
     expect(ctx.workspaceRegistry.list()).toEqual([])
     expect(list).toHaveBeenCalledTimes(1)
-    expect(storedState(pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [] })
+    expect(storedState(pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], archivedWorkspaceIds: [] })
   })
 
   it('bootstraps once from list headers only, in workspace/session createdAt order', async () => {
@@ -230,6 +232,7 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
       initialized: true,
       workspaceIds: result.registry.list().map(workspace => workspace.id),
       archivedSessionIds: [],
+      archivedWorkspaceIds: [],
     })
   })
 
@@ -258,7 +261,7 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
     const second = await harness({ pool, sessions: [header('late', late, 100)] })
     expect(second.list).not.toHaveBeenCalled()
     expect(second.registry.list()).toEqual([])
-    expect(storedState(pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [] })
+    expect(storedState(pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], archivedWorkspaceIds: [] })
   })
 
   it('reuses partial records after a bootstrap record write fails', async () => {
@@ -486,7 +489,7 @@ describe('WorkspaceRegistry create and lookup', () => {
     await expect(result.registry.delete(workspace.id)).resolves.toBe(false)
     expect(result.registry.get(workspace.id)).toBeUndefined()
     expect(result.registry.list()).toEqual([])
-    expect(storedState(result.pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [] })
+    expect(storedState(result.pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], archivedWorkspaceIds: [] })
     expect(result.pool.media.get('workspace')!.tables.get('workspaces')!.has(workspace.id)).toBe(false)
     await expect(realpath(dir)).resolves.toBe(dir)
     expect(result.list).toHaveBeenCalledTimes(1)
@@ -530,6 +533,7 @@ describe('WorkspaceRegistry create and lookup', () => {
       initialized: true,
       workspaceIds: [],
       archivedSessionIds: [],
+      archivedWorkspaceIds: [],
       pendingMutation: { operation: 'delete', workspaceId: workspace.id },
     })
     const reregistered = await first.registry.create(dir)
@@ -538,6 +542,7 @@ describe('WorkspaceRegistry create and lookup', () => {
       initialized: true,
       workspaceIds: [reregistered.id],
       archivedSessionIds: [],
+      archivedWorkspaceIds: [],
     })
     await first.fiber.dispose()
 
@@ -817,7 +822,7 @@ describe('header-validated membership projection', () => {
     const createRecovery = await harness({ pool: interruptedCreate })
     expect(createRecovery.registry.list()).toEqual([])
     expect(interruptedCreate.media.get('workspace')!.tables.get('workspaces')!.has(createId)).toBe(false)
-    expect(storedState(interruptedCreate)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [] })
+    expect(storedState(interruptedCreate)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], archivedWorkspaceIds: [] })
 
     const interruptedDelete = storedPool(
       [[deleteId, record(deleteDir, [])]],
@@ -830,7 +835,7 @@ describe('header-validated membership projection', () => {
     const deleteRecovery = await harness({ pool: interruptedDelete })
     expect(deleteRecovery.registry.list()).toEqual([])
     expect(interruptedDelete.media.get('workspace')!.tables.get('workspaces')!.has(deleteId)).toBe(false)
-    expect(storedState(interruptedDelete)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [] })
+    expect(storedState(interruptedDelete)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], archivedWorkspaceIds: [] })
 
     const corruptPending = storedPool(
       [[deleteId, record(deleteDir, [])]],
@@ -939,6 +944,125 @@ describe('registry-global session archive', () => {
       { initialized: true, workspaceIds: [legacyId] },
     )
     const upgraded = await harness({ pool: legacy })
+    expect(upgraded.registry.archivedSessionIds).toEqual([])
+  })
+})
+
+describe('registry-global workspace archive', () => {
+  it('archives durably in order, idempotently skips repeats, and leaves records and order intact', async () => {
+    const firstDir = await makeDir('ws-archive-first')
+    const secondDir = await makeDir('ws-archive-second')
+    const result = await harness()
+    const first = await result.registry.create(firstDir)
+    const second = await result.registry.create(secondDir)
+
+    await result.registry.archiveWorkspace(second.id)
+    expect(result.registry.archivedWorkspaceIds).toEqual([second.id])
+    // list() semantics are unchanged: archived workspaces stay in durable order.
+    expect(result.registry.list().map(workspace => workspace.id)).toEqual([second.id, first.id])
+    expect(result.registry.get(second.id)).toBe(second)
+    expect(storedState(result.pool).archivedWorkspaceIds).toEqual([second.id])
+    const changesAfterFirst = result.changes.filter(change => change.table === '').length
+
+    await result.registry.archiveWorkspace(second.id)
+    expect(result.registry.archivedWorkspaceIds).toEqual([second.id])
+    // The idempotent repeat neither rewrites the medium nor emits a change.
+    expect(result.changes.filter(change => change.table === '').length).toBe(changesAfterFirst)
+
+    await result.registry.archiveWorkspace(first.id)
+    expect(result.registry.archivedWorkspaceIds).toEqual([second.id, first.id])
+    // Both workspaces hold no sessions, so the session archive set stays empty.
+    expect(result.registry.archivedSessionIds).toEqual([])
+  })
+
+  it('archives a workspace together with its accounted sessions', async () => {
+    const dir = await makeDir('ws-archive-with-sessions')
+    const result = await harness({ sessions: [header('s1', dir, 100), header('s2', dir, 200)] })
+    const workspace = (await result.registry.list())[0]
+    expect(workspace).toBeDefined()
+    expect(workspace?.sessionIds).toHaveLength(2)
+
+    await result.registry.archiveWorkspace(workspace!.id)
+    expect(result.registry.archivedWorkspaceIds).toEqual([workspace!.id])
+    expect(result.registry.archivedSessionIds)
+      .toEqual(expect.arrayContaining([SessionId('s1'), SessionId('s2')]))
+
+    await result.registry.unarchiveWorkspace(workspace!.id)
+    expect(result.registry.archivedWorkspaceIds).toEqual([])
+    expect(result.registry.archivedSessionIds).toEqual([])
+  })
+
+  it('rejects an unknown workspace without writing', async () => {
+    const dir = await makeDir('ws-archive-unknown')
+    const result = await harness()
+    await result.registry.create(dir)
+    const missing = WorkspaceId('00000000-0000-4000-8000-0000000000ff')
+    await expect(result.registry.archiveWorkspace(missing))
+      .rejects.toBeInstanceOf(WorkspaceUnknownWorkspaceError)
+    await expect(result.registry.archiveWorkspace(missing))
+      .rejects.toThrow(/cannot archive unknown workspace '00000000-0000-4000-8000-0000000000ff'/)
+    expect(result.registry.archivedWorkspaceIds).toEqual([])
+    expect(storedState(result.pool).archivedWorkspaceIds).toEqual([])
+  })
+
+  it('unarchives durably and treats unknown or already unarchived ids as write-free no-ops', async () => {
+    const dir = await makeDir('ws-unarchive')
+    const result = await harness()
+    const workspace = await result.registry.create(dir)
+    await result.registry.archiveWorkspace(workspace.id)
+    await result.registry.unarchiveWorkspace(workspace.id)
+    expect(result.registry.archivedWorkspaceIds).toEqual([])
+    expect(storedState(result.pool).archivedWorkspaceIds).toEqual([])
+
+    // Idempotent: an unknown id and an already unarchived id both resolve
+    // without writing.
+    const written = result.changes.length
+    await result.registry.unarchiveWorkspace(workspace.id)
+    await result.registry.unarchiveWorkspace(WorkspaceId('00000000-0000-4000-8000-0000000000ff'))
+    expect(result.changes).toHaveLength(written)
+  })
+
+  it('unarchives a session out of the global archive set, idempotently', async () => {
+    const dir = await makeDir('session-unarchive')
+    const result = await harness({ sessions: [header('s1', dir, 100), header('s2', dir, 200)] })
+    await result.registry.archiveSession(SessionId('s1'))
+    await result.registry.archiveSession(SessionId('s2'))
+    expect(result.registry.archivedSessionIds).toEqual(['s1', 's2'])
+
+    await result.registry.unarchiveSession(SessionId('s1'))
+    expect(result.registry.archivedSessionIds).toEqual(['s2'])
+    expect(storedState(result.pool).archivedSessionIds).toEqual(['s2'])
+
+    const written = result.changes.length
+    await result.registry.unarchiveSession(SessionId('s1'))
+    await result.registry.unarchiveSession(SessionId('ghost'))
+    expect(result.changes).toHaveLength(written)
+    expect(result.registry.archivedSessionIds).toEqual(['s2'])
+  })
+
+  it('restores both archive sets across restarts and defaults them for pre-field media', async () => {
+    const dir = await makeDir('ws-archive-restart')
+    const pool = new MemoryMediaPool()
+    const first = await harness({ pool, sessions: [header('s1', dir, 100)] })
+    const workspace = await first.registry.create(dir)
+    await first.registry.archiveWorkspace(workspace.id)
+    await first.registry.archiveSession(SessionId('s1'))
+    await first.fiber.dispose()
+
+    const second = await harness({ pool, sessions: [header('s1', dir, 100)] })
+    expect(second.registry.archivedWorkspaceIds).toEqual([workspace.id])
+    expect(second.registry.archivedSessionIds).toEqual(['s1'])
+    expect(second.registry.list().map(item => item.id)).toEqual([workspace.id])
+    await second.fiber.dispose()
+
+    // A medium written before either field existed parses through the defaults.
+    const legacyId = WorkspaceId('00000000-0000-4000-8000-0000000000ab')
+    const legacy = storedPool(
+      [[legacyId, record(dir, [])]],
+      { initialized: true, workspaceIds: [legacyId] },
+    )
+    const upgraded = await harness({ pool: legacy })
+    expect(upgraded.registry.archivedWorkspaceIds).toEqual([])
     expect(upgraded.registry.archivedSessionIds).toEqual([])
   })
 })

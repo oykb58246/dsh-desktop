@@ -114,6 +114,12 @@ export type WorkspaceBrowserInjected = DirectoryPickingInjected & {
   forkSession: (sessionId: SessionId) => void
   /** Rename a Host Workspace (rejects on name conflict; resolves on durability). */
   renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
+  /**
+   * Archive a Host Workspace: it and everything grouped under it disappear
+   * from the sidebar while its registration, session accounts, and logs
+   * remain (restorable through the Host's restore surface).
+   */
+  archiveWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   /** Delete only a Host Workspace registration; directory and Session logs remain. */
   deleteWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   /**

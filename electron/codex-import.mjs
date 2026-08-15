@@ -18,7 +18,7 @@ import { randomUUID } from 'node:crypto'
 import { constants, zstdCompress, zstdDecompress } from 'node:zlib'
 import { promisify } from 'node:util'
 import { createWriteStream } from 'node:fs'
-import { mkdir, readFile, readdir, stat, copyFile, open, rename } from 'node:fs/promises'
+import { mkdir, readFile, readdir, stat, copyFile, open, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 
@@ -563,6 +563,32 @@ function depthDelta(deep, shallow) {
 }
 
 /**
+ * Remove any prior artifact carrying the same session id under a DIFFERENT
+ * project directory (a legacy copy-based import). Re-importing under the new
+ * workspace-references-original-directory rules MOVES the session instead of
+ * duplicating it: the JSONL persistence backend rejects one session id that
+ * appears in two project directories.
+ * @param dshHome - the resolved DSH_HOME directory.
+ * @param id - the session id being imported.
+ * @param keepCwd - the cwd whose project directory must be kept.
+ */
+async function removeDuplicateSessionArtifacts(dshHome, id, keepCwd) {
+  const sessionsRoot = path.join(dshHome, 'sessions')
+  const segment = encodeSegment(id)
+  const keepProject = projectKey(keepCwd)
+  let projects
+  try {
+    projects = await readdir(sessionsRoot, { withFileTypes: true })
+  } catch {
+    return // No sessions directory yet; nothing to deduplicate.
+  }
+  for (const project of projects) {
+    if (!project.isDirectory() || project.name === keepProject) continue
+    await rm(path.join(sessionsRoot, project.name, segment), { recursive: true, force: true })
+  }
+}
+
+/**
  * Convert one Codex rollout into a dsh session log (header + events), then
  * write it as a zstd-compressed artifact under DSH_HOME/sessions.
  * @param options - `{ rollout, cwd, sessionId, dshHome, onEvent }`.
@@ -570,6 +596,7 @@ function depthDelta(deep, shallow) {
  */
 export async function importSessionFromRollout({ rollout, cwd, sessionId, dshHome, onEvent }) {
   const { header, events } = await convertRollout(rollout, cwd, sessionId)
+  await removeDuplicateSessionArtifacts(dshHome, header.id, cwd)
   const logPathResult = sessionLogPath(dshHome, cwd, header.id)
   await mkdir(path.dirname(logPathResult), { recursive: true })
   const headerFrame = await zstdCompressAsync(Buffer.from(`${JSON.stringify(toHeaderLine(header))}\n`), CHECKSUM_OPTIONS)

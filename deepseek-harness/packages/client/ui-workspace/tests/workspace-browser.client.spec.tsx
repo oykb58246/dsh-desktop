@@ -38,8 +38,8 @@ const workspace = (id: string, sessionIds: string[], title = id): WorkspaceView 
   workspaceId: wid(id), path: `/projects/${id}`, title,
   sessionIds: sessionIds.map(sid), createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
 })
-const workspaceState = (items: readonly WorkspaceView[], archivedSessionIds: readonly SessionId[] = []): WorkspaceListState => ({
-  items, archivedSessionIds, state: 'idle', phase: 'ready', error: null, baselinesReady: true,
+const workspaceState = (items: readonly WorkspaceView[], archivedSessionIds: readonly SessionId[] = [], archivedWorkspaceIds: readonly WorkspaceId[] = []): WorkspaceListState => ({
+  items, archivedSessionIds, archivedWorkspaceIds, state: 'idle', phase: 'ready', error: null, baselinesReady: true,
   recentWorkspaceId: items[0]?.workspaceId,
 })
 function hook<T>(snapshot: T) {
@@ -74,6 +74,7 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     renameSession: vi.fn(async () => {}),
     forkSession: vi.fn(),
     renameWorkspace: vi.fn(async () => {}),
+    archiveWorkspace: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(async () => {}),
     archiveSession: vi.fn(async () => {}),
     insertWorkspaceBefore: vi.fn(async () => {}),
@@ -1048,77 +1049,35 @@ describe('WorkspaceBrowser', () => {
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('denied') })
   })
 
-  it('confirms Workspace deletion, explains retention, and blocks duplicate submission', async () => {
-    let resolveDelete!: () => void
-    const deleteWorkspace = vi.fn(() => new Promise<void>((resolve) => { resolveDelete = resolve }))
-    const browser = mount({
+  it('archives a workspace from the row menu without a dialog, and logs rejection', async () => {
+    const archiveWorkspace = vi.fn(async () => {})
+    mount({
       useWorkspaces: hook(workspaceState([workspace('alpha', ['session'], 'Alpha')])),
-      deleteWorkspace,
+      archiveWorkspace,
     })
     fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '删除工作区' }))
-    const dialog = screen.getByRole('dialog', { name: '删除工作区' })
-    expect(dialog.textContent).toContain('将把“Alpha”从工作区列表中移除')
-    expect(dialog.textContent).toContain('文件夹与会话记录会保留')
-    expect(dialog.textContent).toContain('其会话将显示在“未分组”下')
-
-    const confirm = screen.getByRole<HTMLButtonElement>('button', { name: '删除工作区' })
-    fireEvent.click(confirm)
-    fireEvent.click(confirm)
-    expect(deleteWorkspace).toHaveBeenCalledOnce()
-    expect(deleteWorkspace).toHaveBeenCalledWith(wid('alpha'))
-    expect(confirm.disabled).toBe(true)
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: '取消' }).disabled).toBe(true)
-    expect(screen.getByRole('status').textContent).toBe('正在删除工作区…')
-    fireEvent.keyDown(document, { key: 'Escape' })
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-    expect(screen.getByRole('dialog', { name: '删除工作区' })).toBeTruthy()
-    await act(async () => { resolveDelete() })
-    // RPC success alone does not close: the component waits until its
-    // useWorkspaces projection has committed the removal, preventing a stale
-    // Workspace frame from leaking into the next gesture.
-    expect(screen.getByRole('dialog', { name: '删除工作区' })).toBeTruthy()
-    rerender(browser, { useWorkspaces: hook(workspaceState([])) })
-    expect(screen.queryByRole('dialog', { name: '删除工作区' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: '归档工作区' }))
+    expect(archiveWorkspace).toHaveBeenCalledOnce()
+    expect(archiveWorkspace).toHaveBeenCalledWith(wid('alpha'))
+    // Archive is not destructive: no confirmation dialog is raised.
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('keeps the delete dialog open on failure and allows retry or cancellation', async () => {
-    const deleteWorkspace = vi.fn()
-      .mockRejectedValueOnce(new Error('storage unavailable'))
-      .mockRejectedValueOnce('denied')
-    mount({
-      useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha')])),
-      deleteWorkspace,
-    })
-    fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '删除工作区' }))
-    fireEvent.click(screen.getByRole('button', { name: '删除工作区' }))
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('storage unavailable') })
-    expect(screen.getByRole('dialog', { name: '删除工作区' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '删除工作区' }))
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('denied') })
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    expect(screen.queryByRole('dialog', { name: '删除工作区' })).toBeNull()
-  })
-
-  it('Cancel, Escape, and Close dismiss deletion without calling the action', () => {
-    const deleteWorkspace = vi.fn(async () => {})
-    mount({
-      useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha')])),
-      deleteWorkspace,
-    })
-    const open = () => {
+  it('logs and keeps the tree when the workspace archive call rejects', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const rejection = new Error('archive exploded')
+      mount({
+        useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha')])),
+        archiveWorkspace: vi.fn(async () => { throw rejection }),
+      })
       fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
-      fireEvent.click(screen.getByRole('menuitem', { name: '删除工作区' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: '归档工作区' }))
+      await waitFor(() => { expect(warn).toHaveBeenCalledWith('workspace archive rejected:', rejection) })
+      expect(screen.getByText('Alpha')).toBeTruthy()
+    } finally {
+      warn.mockRestore()
     }
-    open()
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    open()
-    fireEvent.keyDown(document, { key: 'Escape' })
-    open()
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-    expect(deleteWorkspace).not.toHaveBeenCalled()
-    expect(screen.queryByRole('dialog', { name: '删除工作区' })).toBeNull()
   })
 
   it('search hides drag affordances (rows are not draggable during search)', () => {

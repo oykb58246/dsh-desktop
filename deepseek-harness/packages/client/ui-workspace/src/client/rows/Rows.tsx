@@ -10,7 +10,7 @@ import clsx from 'clsx'
 import {
   HoverCard, IconArchiveOutline20, IconBranchOutline16, IconEditOutline16,
   IconEllipsisOutline16, IconFolderClose16, IconFolderOpen16, IconPlusOutline16,
-  IconTrashOutline16, IconTriangleRightFill14, Menu, StateDot,
+  IconTriangleRightFill14, Menu, StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
@@ -112,7 +112,7 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, t }: 
   onToggle: () => void
   onCreate: () => void
   /** Real-Workspace actions; absent for the ungrouped bucket (no menu shown). */
-  actions?: { rename: () => void; delete: () => void } | undefined
+  actions?: { rename: () => void; archive: () => void } | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
   t: RowTranslate
@@ -122,9 +122,12 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, t }: 
   const label = row.workspaceId === undefined ? t('group.ungrouped') : row.label
   const active = group.expanded && group.containsCurrent
   const [menuOpen, setMenuOpen] = useState(false)
+  // Archive hides the whole workspace group through the registry-global
+  // workspace archive set and never touches records, session accounts, or
+  // logs, so it is not styled as destructive and needs no confirmation.
   const workspaceMenuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
-    { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutline16 />, danger: true },
+    { id: 'archive', label: t('menu.archiveWorkspace'), icon: <IconArchiveOutline20 size={16} /> },
   ]
   const ownRow = (
     <div
@@ -162,9 +165,9 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, t }: 
               // Unknown ids leave before the dispatch: a future menu row must
               // not inherit the destructive branch as an else fallback.
               /* v8 ignore next -- workspaceMenuItems carries exactly these two rows today. */
-              if (id !== 'rename' && id !== 'delete') return
+              if (id !== 'rename' && id !== 'archive') return
               if (id === 'rename') actions.rename()
-              else actions.delete()
+              else actions.archive()
             }}
             portal
             closeOnPointerLeave

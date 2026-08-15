@@ -87,6 +87,9 @@
       "path": "../../interaction/user-questions"
     },
     {
+      "path": "../../vision/vision-qwen"
+    },
+    {
       "path": "../../workspace/workspace"
     },
     {

@@ -162,7 +162,10 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
     },
     workspace: {
       async list(request) {
-        return { rpcId: request.rpcId, result: { ok: true, value: { items: [], archivedSessionIds: [] } } }
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [], archivedSessionIds: [], archivedWorkspaceIds: [] } } }
+      },
+      async listArchived(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { workspaces: [], archivedSessionIds: [] } } }
       },
       async create(request) {
         return {
@@ -190,6 +193,15 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
       },
       async archiveSession(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { archivedSessionIds: [request.payload.sessionId] } } }
+      },
+      async archive(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [], archivedSessionIds: [], archivedWorkspaceIds: [request.payload.workspaceId] } } }
+      },
+      async unarchive(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [], archivedSessionIds: [], archivedWorkspaceIds: [] } } }
+      },
+      async unarchiveSession(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { archivedSessionIds: [] } } }
       },
     },
     agentPresets: {

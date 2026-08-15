@@ -38,6 +38,10 @@ const MANIFEST_URL = process.env.DSH_DESKTOP_UPDATE_MANIFEST || DEFAULT_MANIFEST
 const API_BASE = `https://api.github.com/repos/${OFFICIAL_REPO}`
 const NPM_LATEST_URL = 'https://registry.npmjs.org/@deepseek-ai%2Fdsh/latest'
 const USER_AGENT = 'dsh-desktop-updater'
+// The setup artifact is small; a download that makes no progress for this long
+// is stuck (server stalled, connection half-open) and must not leave the tools
+// panel in the "下载中" state forever.
+const DOWNLOAD_TIMEOUT_MS = 20 * 60_000
 
 const state = {
   latest: null, // manifest snapshot or null when no baseline was published
@@ -270,12 +274,18 @@ export async function downloadUpdate() {
   state.downloadError = null
   const controller = new AbortController()
   state.abort = controller
+  // The user can cancel via `controller`; the timeout guards against a
+  // half-open connection that would otherwise hang the download forever.
+  const downloadSignal = AbortSignal.any([
+    controller.signal,
+    AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+  ])
 
   try {
     const response = await fetch(latest.url, {
       headers: { 'user-agent': USER_AGENT },
       redirect: 'follow',
-      signal: controller.signal,
+      signal: downloadSignal,
     })
     if (!response.ok || response.body === null) throw new Error(`HTTP ${response.status}`)
     const total = Number(response.headers.get('content-length') ?? latest.size ?? 0)
@@ -296,7 +306,7 @@ export async function downloadUpdate() {
     })
     sendProgress({ phase: 'download', received: 0, total, percent: 0 })
     await pipeline(Readable.fromWeb(response.body), meter, createWriteStream(partial), {
-      signal: controller.signal,
+      signal: downloadSignal,
     })
 
     const digest = hash.digest('base64')
@@ -318,7 +328,11 @@ export async function downloadUpdate() {
     state.downloading = false
     return snapshot()
   } catch (error) {
-    if (!controller.signal.aborted) state.downloadError = errorMessage(error)
+    if (!controller.signal.aborted) {
+      state.downloadError = downloadSignal.aborted && !controller.signal.aborted
+        ? `下载超时（超过 ${Math.round(DOWNLOAD_TIMEOUT_MS / 60_000)} 分钟无进展），已取消下载`
+        : errorMessage(error)
+    }
     await rm(partial, { force: true }).catch(() => {})
     state.downloading = false
     return snapshot()

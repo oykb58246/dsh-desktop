@@ -25,11 +25,28 @@ export const workspaceViewSchema = z.object({
 /** workspace.list request payload (empty object literal). */
 export const workspaceListRequestSchema = z.object({}) satisfies z.ZodType<Wire<RequestPayload<'workspace.list'>>>
 
-/** workspace.list response value. */
-export const workspaceListValueSchema = z.object({
+/**
+ * The workspace-list-shaped snapshot value shared by list/archive/unarchive:
+ * the visible (unarchived) workspace rows plus both registry-global archive
+ * sets, so a client installs the whole post-mutation state from one value.
+ */
+const workspaceSnapshotValueSchema = z.object({
   items: z.array(workspaceViewSchema),
   archivedSessionIds: z.array(sessionIdSchema),
+  archivedWorkspaceIds: z.array(workspaceIdSchema),
 }) satisfies z.ZodType<Wire<ResponseValue<'workspace.list'>>>
+
+/** workspace.list response value. */
+export const workspaceListValueSchema = workspaceSnapshotValueSchema
+
+/** workspace.listArchived request payload (empty object literal). */
+export const workspaceListArchivedRequestSchema = z.object({}) satisfies z.ZodType<Wire<RequestPayload<'workspace.listArchived'>>>
+
+/** workspace.listArchived response value: archived workspace views plus the session archive set. */
+export const workspaceListArchivedValueSchema = z.object({
+  workspaces: z.array(workspaceViewSchema),
+  archivedSessionIds: z.array(sessionIdSchema),
+}) satisfies z.ZodType<Wire<ResponseValue<'workspace.listArchived'>>>
 
 /** workspace.create request payload: the existing directory to adopt. */
 export const workspaceCreateRequestSchema = z.object({
@@ -98,3 +115,29 @@ export const workspaceArchiveSessionRequestSchema = z.object({
 export const workspaceArchiveSessionValueSchema = z.object({
   archivedSessionIds: z.array(sessionIdSchema),
 }) satisfies z.ZodType<Wire<ResponseValue<'workspace.archiveSession'>>>
+
+/** workspace.archive request payload. */
+export const workspaceArchiveRequestSchema = z.object({
+  workspaceId: workspaceIdSchema,
+}) satisfies z.ZodType<Wire<RequestPayload<'workspace.archive'>>>
+
+/** workspace.archive response value: the full post-mutation snapshot (same shape as workspace.list). */
+export const workspaceArchiveValueSchema = workspaceSnapshotValueSchema
+
+/** workspace.unarchive request payload. */
+export const workspaceUnarchiveRequestSchema = z.object({
+  workspaceId: workspaceIdSchema,
+}) satisfies z.ZodType<Wire<RequestPayload<'workspace.unarchive'>>>
+
+/** workspace.unarchive response value: the full post-mutation snapshot (same shape as workspace.list). */
+export const workspaceUnarchiveValueSchema = workspaceSnapshotValueSchema
+
+/** workspace.unarchiveSession request payload. */
+export const workspaceUnarchiveSessionRequestSchema = z.object({
+  sessionId: sessionIdSchema,
+}) satisfies z.ZodType<Wire<RequestPayload<'workspace.unarchiveSession'>>>
+
+/** workspace.unarchiveSession response value: the full updated session archive set. */
+export const workspaceUnarchiveSessionValueSchema = z.object({
+  archivedSessionIds: z.array(sessionIdSchema),
+}) satisfies z.ZodType<Wire<ResponseValue<'workspace.unarchiveSession'>>>

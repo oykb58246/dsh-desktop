@@ -9,7 +9,11 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   windowAction(action) {
     ipcRenderer.send('window-action', action)
   },
-  /** Read the persisted import configuration (sessions root + target root). */
+  /** Open a URL in the system browser. */
+  openExternal(url) {
+    return ipcRenderer.invoke('open-external', String(url))
+  },
+  /** Read the persisted import configuration (sessions root). */
   getImportConfig() {
     return ipcRenderer.invoke('codex-import-get-config')
   },
@@ -28,10 +32,6 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   /** Reset the sessions directory to the auto-detected default. */
   resetSessionsRoot() {
     return ipcRenderer.invoke('codex-sessions-reset')
-  },
-  /** Choose (and persist) the Harness target directory. */
-  chooseTarget() {
-    return ipcRenderer.invoke('codex-import-choose-target')
   },
   onImportProgress(callback) {
     const listener = (_event, payload) => callback(payload)
@@ -69,26 +69,26 @@ contextBridge.exposeInMainWorld('dshDesktop', {
     ipcRenderer.on('update:available', listener)
     return () => ipcRenderer.removeListener('update:available', listener)
   },
-  /** Installer UI bridges (used by installer.html). */
-  installerDefaults() {
-    return ipcRenderer.invoke('installer:defaults')
+  /** Vision plugin (built-in Qwen-VL bridge) configuration bridges. */
+  visionGetConfig() {
+    return ipcRenderer.invoke('vision:get-config')
   },
-  installerChooseDir() {
-    return ipcRenderer.invoke('installer:choose-dir')
+  visionSetConfig(next) {
+    return ipcRenderer.invoke('vision:set-config', next)
   },
-  installerStart(target) {
-    return ipcRenderer.invoke('installer:start', target)
+  visionTest(next) {
+    return ipcRenderer.invoke('vision:test', next)
   },
-  installerLogTail() {
-    return ipcRenderer.invoke('installer:log-tail')
+  /** Archive management bridges (restore archived workspaces/sessions). */
+  archiveList() {
+    return ipcRenderer.invoke('archive:list')
   },
-  installerFinish(launch) {
-    return ipcRenderer.invoke('installer:finish', launch)
+  archiveRestoreWorkspace(workspaceId) {
+    return ipcRenderer.invoke('archive:restore-workspace', workspaceId)
   },
-  installerCancel() {
-    return ipcRenderer.invoke('installer:cancel')
+  archiveRestoreSession(sessionId) {
+    return ipcRenderer.invoke('archive:restore-session', sessionId)
   },
-
   /** Installer UI bridges (used by installer.html). */
   installerDefaults() {
     return ipcRenderer.invoke('installer:defaults')

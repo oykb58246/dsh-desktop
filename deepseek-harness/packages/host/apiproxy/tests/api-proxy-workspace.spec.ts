@@ -568,3 +568,114 @@ describe('Host Workspace increments', () => {
     abort.abort()
   })
 })
+
+describe('workspace archive and restore', () => {
+  it('archives a workspace, hides it from list, keeps its record, and streams one archive frame', async () => {
+    const { api, root } = await harness()
+    const first = expectOk(await api.workspace.create(request({ path: stageDir(root, 'keep') }))).workspace
+    const second = expectOk(await api.workspace.create(request({ path: stageDir(root, 'archive-me') }))).workspace
+    const sessionId = SessionId('session-archived-with-workspace')
+    expectOk(await api.sessions.create(request({ workspaceId: second.workspaceId, sessionId })))
+    expect(expectOk(await api.workspace.list(request({}))).archivedWorkspaceIds).toEqual([])
+
+    const abort = new AbortController()
+    const stream: AsyncIterator<RpcRequest<HostFrame>> =
+      api.events.host(request({}), abort.signal)[Symbol.asyncIterator]()
+    // Archiving a workspace with sessions changes both archive sets, so the
+    // stream first announces the sessions frame, then the workspaces frame.
+    const changedSessions = nextHostFrame(stream)
+    const changedWorkspaces = nextHostFrame(stream)
+    const archived = expectOk(await api.workspace.archive(request({ workspaceId: second.workspaceId })))
+    expect(archived.archivedWorkspaceIds).toEqual([second.workspaceId])
+    expect(archived.items.map(item => item.workspaceId)).toEqual([first.workspaceId])
+    // Archiving the workspace also archives its accounted sessions.
+    expect(archived.archivedSessionIds).toEqual([sessionId])
+    expect(await changedSessions).toMatchObject({
+      payload: { type: 'host/archived-sessions-changed', archivedSessionIds: [sessionId] },
+    })
+    expect(await changedWorkspaces).toMatchObject({
+      payload: { type: 'host/archived-workspaces-changed', archivedWorkspaceIds: [second.workspaceId] },
+    })
+
+    // The workspace and its sessions leave the sidebar baseline but stay in
+    // the registry: listArchived returns the full view.
+    const listed = expectOk(await api.workspace.list(request({})))
+    expect(listed.archivedWorkspaceIds).toEqual([second.workspaceId])
+    expect(listed.items.map(item => item.workspaceId)).toEqual([first.workspaceId])
+    const archivedListing = expectOk(await api.workspace.listArchived(request({})))
+    expect(archivedListing.workspaces).toEqual([
+      expect.objectContaining({ workspaceId: second.workspaceId, sessionIds: [sessionId] }),
+    ])
+    expect(expectOk(await api.sessions.list(request({}))).items.map(item => item.sessionId)).toContain(sessionId)
+
+    // The idempotent repeat emits no frame of its own: the next observed
+    // frames are the unarchive's own archive-set changes (sessions, then
+    // workspaces).
+    const afterSessions = nextHostFrame(stream)
+    const afterWorkspaces = nextHostFrame(stream)
+    expect(expectOk(await api.workspace.archive(request({ workspaceId: second.workspaceId })))
+      .archivedWorkspaceIds).toEqual([second.workspaceId])
+    expect(expectOk(await api.workspace.unarchive(request({ workspaceId: second.workspaceId })))
+      .archivedWorkspaceIds).toEqual([])
+    expect(await afterSessions).toMatchObject({
+      payload: { type: 'host/archived-sessions-changed', archivedSessionIds: [] },
+    })
+    expect(await afterWorkspaces).toMatchObject({
+      payload: { type: 'host/archived-workspaces-changed', archivedWorkspaceIds: [] },
+    })
+
+    const missing = await api.workspace.archive(request({
+      workspaceId: 'missing-workspace' as WorkspaceId,
+    }))
+    expect(missing.result).toMatchObject({
+      ok: false,
+      error: { code: 'workspace-not-found', details: { workspaceId: 'missing-workspace' } },
+    })
+    abort.abort()
+  })
+
+  it('unarchives a workspace back into its durable position and rejects unknown ids', async () => {
+    const { api, root } = await harness()
+    const first = expectOk(await api.workspace.create(request({ path: stageDir(root, 'first') }))).workspace
+    const second = expectOk(await api.workspace.create(request({ path: stageDir(root, 'second') }))).workspace
+    expectOk(await api.workspace.archive(request({ workspaceId: second.workspaceId })))
+    expect(expectOk(await api.workspace.list(request({}))).items.map(item => item.workspaceId))
+      .toEqual([first.workspaceId])
+
+    const restored = expectOk(await api.workspace.unarchive(request({ workspaceId: second.workspaceId })))
+    expect(restored.archivedWorkspaceIds).toEqual([])
+    // The durable registry order is untouched: second still leads.
+    expect(restored.items.map(item => item.workspaceId)).toEqual([second.workspaceId, first.workspaceId])
+    expect(expectOk(await api.workspace.listArchived(request({}))).workspaces).toEqual([])
+
+    // Idempotent for an already unarchived id; unknown ids fail loud.
+    expect(expectOk(await api.workspace.unarchive(request({ workspaceId: second.workspaceId })))
+      .items.map(item => item.workspaceId)).toEqual([second.workspaceId, first.workspaceId])
+    const missing = await api.workspace.unarchive(request({
+      workspaceId: 'missing-workspace' as WorkspaceId,
+    }))
+    expect(missing.result).toMatchObject({
+      ok: false,
+      error: { code: 'workspace-not-found', details: { workspaceId: 'missing-workspace' } },
+    })
+  })
+
+  it('unarchives a session out of the global set idempotently, including unknown ids', async () => {
+    const { api, root } = await harness()
+    const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'unarchive-home') }))).workspace
+    const sessionId = SessionId('session-to-unarchive')
+    expectOk(await api.sessions.create(request({ workspaceId: workspace.workspaceId, sessionId })))
+    expectOk(await api.workspace.archiveSession(request({ sessionId })))
+    expect(expectOk(await api.workspace.list(request({}))).archivedSessionIds).toEqual([sessionId])
+
+    const unarchived = expectOk(await api.workspace.unarchiveSession(request({ sessionId })))
+    expect(unarchived.archivedSessionIds).toEqual([])
+    expect(expectOk(await api.workspace.list(request({}))).archivedSessionIds).toEqual([])
+
+    // Idempotent: an already unarchived and an unknown session both resolve.
+    expect(expectOk(await api.workspace.unarchiveSession(request({ sessionId }))).archivedSessionIds)
+      .toEqual([])
+    expect(expectOk(await api.workspace.unarchiveSession(request({ sessionId: SessionId('session-ghost') })))
+      .archivedSessionIds).toEqual([])
+  })
+})

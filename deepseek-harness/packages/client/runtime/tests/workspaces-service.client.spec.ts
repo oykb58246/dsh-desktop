@@ -185,6 +185,89 @@ describe('WorkspaceManager', () => {
     await refresh
     expect(manager.getSnapshot().items).toEqual([])
   })
+
+  it('archives a workspace: the row leaves items, the set installs, and a stale baseline cannot resurrect it', async () => {
+    const api = new FakeApiClient()
+    api.onWorkspaceList = () => Promise.resolve(ok({
+      items: [workspace('kept'), workspace('hidden')] as never[],
+      archivedWorkspaceIds: [] as never[],
+    }))
+    const manager = new WorkspaceManager(api)
+    await manager.refresh()
+    expect(manager.getSnapshot().items.map(item => item.workspaceId)).toEqual(['kept', 'hidden'])
+    expect(manager.getSnapshot().archivedWorkspaceIds).toEqual([])
+
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onWorkspaceList']>>>()
+    api.onWorkspaceList = () => gate.promise
+    const refresh = manager.refresh()
+    api.onWorkspaceArchive = () => Promise.resolve(ok({
+      items: [workspace('kept')], archivedSessionIds: [], archivedWorkspaceIds: [wid('hidden')],
+    }))
+    await expect(manager.archiveWorkspace(wid('hidden'))).resolves.toMatchObject({ ok: true })
+    expect(api.callsOf('workspace.archive')).toEqual([{ workspaceId: 'hidden' }])
+    expect(manager.getSnapshot().items.map(item => item.workspaceId)).toEqual(['kept'])
+    expect(manager.getSnapshot().archivedWorkspaceIds).toEqual(['hidden'])
+
+    // The stale baseline (still carrying the archived row) resolves last and
+    // must not resurrect it.
+    gate.resolve(ok({ items: [workspace('kept'), workspace('hidden')] as never[] }))
+    await refresh
+    expect(manager.getSnapshot().items.map(item => item.workspaceId)).toEqual(['kept'])
+    expect(manager.getSnapshot().archivedWorkspaceIds).toEqual(['hidden'])
+
+    // A changed frame for the archived workspace is likewise rejected.
+    manager.handleHostEnvelope({
+      rpcId: 'late-change' as never,
+      payload: { type: 'host/workspace-changed', workspace: workspace('hidden') },
+    })
+    expect(manager.getSnapshot().items.map(item => item.workspaceId)).toEqual(['kept'])
+  })
+
+  it('unarchives a workspace: the row returns at its Host position and a stale baseline keeps it', async () => {
+    const api = new FakeApiClient()
+    api.onWorkspaceList = () => Promise.resolve(ok({
+      items: [workspace('kept')] as never[],
+      archivedWorkspaceIds: [wid('hidden')] as never[],
+    }))
+    const manager = new WorkspaceManager(api)
+    await manager.refresh()
+
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onWorkspaceList']>>>()
+    api.onWorkspaceList = () => gate.promise
+    const refresh = manager.refresh()
+    api.onWorkspaceUnarchive = () => Promise.resolve(ok({
+      items: [workspace('hidden'), workspace('kept')],
+      archivedSessionIds: [],
+      archivedWorkspaceIds: [],
+    }))
+    await expect(manager.unarchiveWorkspace(wid('hidden'))).resolves.toMatchObject({ ok: true })
+    expect(api.callsOf('workspace.unarchive')).toEqual([{ workspaceId: 'hidden' }])
+    expect(manager.getSnapshot().items.map(item => item.workspaceId)).toEqual(['hidden', 'kept'])
+    expect(manager.getSnapshot().archivedWorkspaceIds).toEqual([])
+
+    // The stale baseline (fetched while hidden was still archived) must keep
+    // the restored row through the replayed upsert delta.
+    gate.resolve(ok({ items: [workspace('kept')] as never[] }))
+    await refresh
+    expect(manager.getSnapshot().items.map(item => item.workspaceId)).toEqual(['hidden', 'kept'])
+  })
+
+  it('unarchives a session and installs the returned set, and installs the workspace-archive frame', async () => {
+    const api = new FakeApiClient()
+    const manager = new WorkspaceManager(api)
+    api.onWorkspaceUnarchiveSession = () => Promise.resolve(ok({ archivedSessionIds: [] }))
+    await expect(manager.unarchiveSession(sid('s1'))).resolves.toMatchObject({ ok: true })
+    expect(api.callsOf('workspace.unarchiveSession')).toEqual([{ sessionId: 's1' }])
+    expect(manager.getSnapshot().archivedSessionIds).toEqual([])
+
+    api.onWorkspaceList = () => Promise.resolve(ok({ items: [] as never[] }))
+    await manager.refresh()
+    manager.handleHostEnvelope({
+      rpcId: 'frame' as never,
+      payload: { type: 'host/archived-workspaces-changed', archivedWorkspaceIds: [wid('w1')] },
+    })
+    expect(manager.getSnapshot().archivedWorkspaceIds).toEqual(['w1'])
+  })
 })
 
 describe('WorkspaceRuntime', () => {
@@ -518,6 +601,53 @@ describe('WorkspaceRuntime', () => {
     api.onWorkspaceList = () => Promise.resolve(ok({ items: [], archivedSessionIds: [] }) as never)
     await workspaces.refresh()
     expect(workspaces.list.getSnapshot().archivedSessionIds).toEqual([])
+  })
+
+  it('archives/unarchives workspaces and sessions through the runtime face with the projected snapshot', async () => {
+    const ctx = new Context()
+    const api = new FakeApiClient()
+    const sessions = new SessionRuntime(ctx, api, fakeRemote())
+    const workspaces = new WorkspaceRuntime(ctx, api, sessions)
+    api.onWorkspaceList = () => Promise.resolve(ok({
+      items: [workspace('alpha'), workspace('beta')] as never[],
+      archivedWorkspaceIds: [] as never[],
+    }))
+    await workspaces.refresh()
+
+    // Archive: the echo snapshot hides beta and records the archive set.
+    api.onWorkspaceArchive = () => Promise.resolve(ok({
+      items: [workspace('alpha')], archivedSessionIds: [], archivedWorkspaceIds: [wid('beta')],
+    }))
+    await expect(workspaces.archiveWorkspace(wid('beta'))).resolves.toBeUndefined()
+    expect(api.callsOf('workspace.archive')).toEqual([{ workspaceId: 'beta' }])
+    expect(workspaces.list.getSnapshot().items.map(item => item.workspaceId)).toEqual(['alpha'])
+    expect(workspaces.list.getSnapshot().archivedWorkspaceIds).toEqual(['beta'])
+
+    // Host rejection leaves the projection untouched.
+    api.onWorkspaceArchive = () => Promise.resolve(err({
+      code: 'workspace-not-found', message: 'gone', details: { workspaceId: 'ghost' },
+    }))
+    await expect(workspaces.archiveWorkspace(wid('ghost'))).rejects.toThrow(/workspace archive failed/)
+    expect(workspaces.list.getSnapshot().archivedWorkspaceIds).toEqual(['beta'])
+
+    // Unarchive restores the row and clears the set.
+    api.onWorkspaceUnarchive = () => Promise.resolve(ok({
+      items: [workspace('beta'), workspace('alpha')],
+      archivedSessionIds: [],
+      archivedWorkspaceIds: [],
+    }))
+    await expect(workspaces.unarchiveWorkspace(wid('beta'))).resolves.toBeUndefined()
+    expect(workspaces.list.getSnapshot().items.map(item => item.workspaceId)).toEqual(['beta', 'alpha'])
+    expect(workspaces.list.getSnapshot().archivedWorkspaceIds).toEqual([])
+
+    // Session unarchive forwards and projects the returned set.
+    api.onWorkspaceUnarchiveSession = () => Promise.resolve(ok({ archivedSessionIds: [] }))
+    await expect(workspaces.unarchiveSession(sid('s1'))).resolves.toBeUndefined()
+    expect(api.callsOf('workspace.unarchiveSession')).toEqual([{ sessionId: 's1' }])
+    api.onWorkspaceUnarchiveSession = () => Promise.resolve(err({
+      code: 'internal', message: 'down', details: {},
+    }))
+    await expect(workspaces.unarchiveSession(sid('s1'))).rejects.toThrow(/session unarchive failed/)
   })
 })
 

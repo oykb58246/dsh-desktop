@@ -90,6 +90,7 @@ export function apply(ctx: ClientContext): void {
         })
     },
     renameWorkspace: async (workspaceId, title) => { await ctx.workspaces.rename(workspaceId, title) },
+    archiveWorkspace: async (workspaceId) => { await ctx.workspaces.archiveWorkspace(workspaceId) },
     deleteWorkspace: async (workspaceId) => { await ctx.workspaces.delete(workspaceId) },
     insertWorkspaceBefore: async (workspaceId, beforeWorkspaceId) => {
       await ctx.workspaces.insertBefore(workspaceId, beforeWorkspaceId)

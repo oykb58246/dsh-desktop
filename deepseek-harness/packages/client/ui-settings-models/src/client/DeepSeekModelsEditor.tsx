@@ -10,6 +10,7 @@ import type { ReactNode } from 'react'
 import {
   IconChevronDownOutline14, IconChevronRightOutline14, IconPlusOutline16, IconTrashOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { THINKING_LEVELS } from './ReasoningEffortsField.tsx'
 import type { en } from './locales.ts'
 import styles from './ModelsSection.module.css'
 
@@ -74,7 +75,7 @@ export interface DeepSeekModelsValidationFailure {
   index: number
   /** Message key owned by the Models settings section. */
   key: 'modelIdRequired' | 'modelIdDuplicate' | 'modelNameInvalid' | 'modelContextInvalid'
-  | 'modelMaxTokensInvalid'
+  | 'modelMaxTokensInvalid' | 'modelReasoningInvalid'
 }
 
 /** Convert a schema-validated catalog value into records without dropping hidden fields. */
@@ -117,6 +118,29 @@ export function validateDeepSeekModels(value: unknown): DeepSeekModelsValidation
     if (maxTokens !== undefined
       && (typeof maxTokens !== 'number' || !Number.isInteger(maxTokens) || maxTokens <= 0)) {
       return { index, key: 'modelMaxTokensInvalid' }
+    }
+    const reasoningEfforts = model['reasoningEfforts']
+    if (reasoningEfforts !== undefined
+      && (typeof reasoningEfforts !== 'object'
+        || reasoningEfforts === null
+        || Array.isArray(reasoningEfforts))) {
+      return { index, key: 'modelReasoningInvalid' }
+    }
+    if (typeof reasoningEfforts === 'object') {
+      const entries = Object.entries(reasoningEfforts)
+      if (entries.length === 0) return { index, key: 'modelReasoningInvalid' }
+      const thinking = entries.filter(([level]) => level !== 'off')
+      if (thinking.length === 0) return { index, key: 'modelReasoningInvalid' }
+      for (const [level, wire] of entries) {
+        if (!THINKING_LEVELS.includes(level as typeof THINKING_LEVELS[number])) {
+          return { index, key: 'modelReasoningInvalid' }
+        }
+        if (level === 'off') {
+          if (wire !== null) return { index, key: 'modelReasoningInvalid' }
+        } else if (typeof wire !== 'string' || wire.length === 0) {
+          return { index, key: 'modelReasoningInvalid' }
+        }
+      }
     }
   }
   return undefined

@@ -52,6 +52,21 @@ export class WorkspaceUnknownSessionError extends Error {
   }
 }
 
+/**
+ * An archiveWorkspace request named a workspace absent from the durable
+ * registry order — a definite miss only; storage faults propagate as
+ * themselves.
+ */
+export class WorkspaceUnknownWorkspaceError extends Error {
+  /**
+   * @param workspaceId - The unknown workspace id.
+   */
+  constructor(readonly workspaceId: WorkspaceId) {
+    super(`cannot archive unknown workspace '${workspaceId}'`)
+    this.name = 'WorkspaceUnknownWorkspaceError'
+  }
+}
+
 /** A workspace reorder named a source or anchor absent from the durable registry order. */
 export class WorkspaceOrderInvalidError extends Error {
   /**
@@ -255,6 +270,85 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
+   * The registry-global workspace archive set: workspaces hidden from every
+   * grouping surface while their records, session accounts, and places in
+   * the durable order remain (unarchiving restores the position). Archiving
+   * never touches per-session archive state — a workspace is hidden whole
+   * by its own flag.
+   * @returns the archived workspace ids in archive order.
+   */
+  get archivedWorkspaceIds(): readonly WorkspaceId[] {
+    return this.requireState().archivedWorkspaceIds
+  }
+
+  /**
+   * Archive one workspace durably. The workspace must exist in the registry
+   * order. An already archived id resolves without writing. Archiving also
+   * moves the workspace's accounted sessions into the session archive set, so
+   * the whole group disappears from every grouping surface while its record
+   * and every session log remain intact. Individual session archive flags
+   * already set stay set.
+   * @param id - The workspace to archive.
+   * @returns resolution after durability.
+   */
+  archiveWorkspace(id: WorkspaceId): Promise<void> {
+    return this.enqueueOperation(async () => {
+      const state = this.requireState()
+      if (state.archivedWorkspaceIds.includes(id)) return
+      if (!state.workspaceIds.includes(id)) throw new WorkspaceUnknownWorkspaceError(id)
+      const record = this.requireTable().get(id)
+      const sessionIds = record?.sessionIds ?? []
+      const added = sessionIds.filter(sessionId => !state.archivedSessionIds.includes(sessionId))
+      await this.setState({
+        ...state,
+        archivedWorkspaceIds: [...state.archivedWorkspaceIds, id],
+        archivedSessionIds: [...state.archivedSessionIds, ...added],
+      })
+    })
+  }
+
+  /**
+   * Unarchive one workspace durably: remove it from the archive set so its
+   * group reappears in its original position, and unarchive the sessions it
+   * archived with it. Idempotent; an unknown or already unarchived id
+   * resolves without writing.
+   * @param id - The workspace to unarchive.
+   * @returns resolution after durability.
+   */
+  unarchiveWorkspace(id: WorkspaceId): Promise<void> {
+    return this.enqueueOperation(async () => {
+      const state = this.requireState()
+      if (!state.archivedWorkspaceIds.includes(id)) return
+      const record = this.requireTable().get(id)
+      const sessionIds = new Set(record?.sessionIds ?? [])
+      await this.setState({
+        ...state,
+        archivedWorkspaceIds: state.archivedWorkspaceIds.filter(workspaceId => workspaceId !== id),
+        archivedSessionIds: state.archivedSessionIds.filter(sessionId => !sessionIds.has(sessionId)),
+      })
+    })
+  }
+
+  /**
+   * Unarchive one session durably: remove it from the registry-global
+   * session archive set so it reappears in its workspace group (or the
+   * Ungrouped bucket) at its original position. Idempotent; an unknown or
+   * already unarchived id resolves without writing.
+   * @param sessionId - The session to unarchive.
+   * @returns resolution after durability.
+   */
+  unarchiveSession(sessionId: SessionId): Promise<void> {
+    return this.enqueueOperation(async () => {
+      const state = this.requireState()
+      if (!state.archivedSessionIds.includes(sessionId)) return
+      await this.setState({
+        ...state,
+        archivedSessionIds: state.archivedSessionIds.filter(archived => archived !== sessionId),
+      })
+    })
+  }
+
+  /**
    * Whether a session is live, header-indexed, or present in a fresh
    * persistence listing. Only a definite miss returns false — a failing
    * `sessionPersistence.list()` propagates so storage faults never
@@ -331,6 +425,7 @@ export class WorkspaceRegistry extends Service {
         initialized: true,
         workspaceIds: [id, ...state.workspaceIds],
         archivedSessionIds: state.archivedSessionIds,
+        archivedWorkspaceIds: state.archivedWorkspaceIds,
       })
     } catch (error) {
       this.entities.delete(id)
@@ -363,6 +458,7 @@ export class WorkspaceRegistry extends Service {
       initialized: true,
       workspaceIds: state.workspaceIds.filter(workspaceId => workspaceId !== id),
       archivedSessionIds: state.archivedSessionIds,
+      archivedWorkspaceIds: state.archivedWorkspaceIds,
     }
     await this.setState({
       ...nextState,
@@ -420,6 +516,7 @@ export class WorkspaceRegistry extends Service {
       initialized: state.initialized,
       workspaceIds: state.workspaceIds,
       archivedSessionIds: state.archivedSessionIds,
+      archivedWorkspaceIds: state.archivedWorkspaceIds,
     })
   }
 
@@ -502,9 +599,19 @@ export class WorkspaceRegistry extends Service {
       .map(([id]) => id)
 
     if (!sameIds(state.workspaceIds, workspaceIds)) {
-      await this.setState({ initialized: false, workspaceIds, archivedSessionIds: state.archivedSessionIds })
+      await this.setState({
+        initialized: false,
+        workspaceIds,
+        archivedSessionIds: state.archivedSessionIds,
+        archivedWorkspaceIds: state.archivedWorkspaceIds,
+      })
     }
-    await this.setState({ initialized: true, workspaceIds, archivedSessionIds: state.archivedSessionIds })
+    await this.setState({
+      initialized: true,
+      workspaceIds,
+      archivedSessionIds: state.archivedSessionIds,
+      archivedWorkspaceIds: state.archivedWorkspaceIds,
+    })
   }
 
   private validateStoredState(state: WorkspaceDomainState): void {

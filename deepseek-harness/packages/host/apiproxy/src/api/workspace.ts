@@ -35,15 +35,67 @@ export interface WorkspaceView {
   updatedAt: string
 }
 
+/**
+ * The workspace reconnect-baseline snapshot shared by `workspace.list`,
+ * `workspace.archive`, and `workspace.unarchive` values: the visible
+ * (unarchived) workspace rows, the registry-global session archive set, and
+ * the registry-global workspace archive set. Carrying the full snapshot lets
+ * a client install the post-mutation state from one unary response.
+ */
+export interface WorkspaceListValue {
+  items: WorkspaceView[]
+  archivedSessionIds: SessionId[]
+  archivedWorkspaceIds: WorkspaceId[]
+}
+
 /** Workspace-domain unary methods (the map keys workspace.* of RpcMethodMap). */
 export interface WorkspaceApi {
   /**
-   * Lists all workspaces in the registry's durable display order, plus the
-   * registry-global archive set (the reconnect baseline of
-   * `host/archived-sessions-changed`). Archived sessions stay in their
-   * workspace's `sessionIds` account; grouping surfaces hide them.
+   * Lists the unarchived workspaces in the registry's durable display order,
+   * plus both registry-global archive sets (the reconnect baseline of
+   * `host/archived-sessions-changed` and `host/archived-workspaces-changed`).
+   * Archived workspaces stay in the registry (their rows appear through
+   * `workspace.listArchived`); archived sessions stay in their workspace's
+   * `sessionIds` account; grouping surfaces hide both.
    */
-  list(request: RpcRequest<{}>): Promise<RpcResponse<{ items: WorkspaceView[]; archivedSessionIds: SessionId[] }>>
+  list(request: RpcRequest<{}>): Promise<RpcResponse<WorkspaceListValue>>
+
+  /**
+   * Archives one workspace: it (and everything grouped under it) disappears
+   * from the sidebar while its record, session account, and durable-order
+   * position remain, so `workspace.unarchive` restores it as-is. Workspace
+   * archiving never touches the session archive set — the workspace flag
+   * hides the group whole. An unknown id fails with `workspace-not-found`;
+   * an already archived id is an idempotent success. Returns the full
+   * post-mutation snapshot (same shape as `workspace.list`).
+   */
+  archive(request: RpcRequest<{ workspaceId: WorkspaceId }>): Promise<RpcResponse<WorkspaceListValue>>
+
+  /**
+   * Unarchives one workspace: it reappears in the sidebar at its original
+   * durable-order position, session account intact. Idempotent for an
+   * already unarchived id; an unknown id fails with `workspace-not-found`.
+   * Returns the full post-mutation snapshot (same shape as
+   * `workspace.list`).
+   */
+  unarchive(request: RpcRequest<{ workspaceId: WorkspaceId }>): Promise<RpcResponse<WorkspaceListValue>>
+
+  /**
+   * Removes one session from the registry-global archive set: it reappears
+   * in its workspace group (or the Ungrouped bucket) at its original
+   * position. Idempotent; an unknown or already unarchived session resolves
+   * as a no-op. Returns the full updated session archive set.
+   */
+  unarchiveSession(request: RpcRequest<{ sessionId: SessionId }>):
+  Promise<RpcResponse<{ archivedSessionIds: SessionId[] }>>
+
+  /**
+   * Lists the archived workspaces (full views, session accounts included) in
+   * archive order, plus the registry-global session archive set — the
+   * restore-panel baseline that pairs with `workspace.unarchive`.
+   */
+  listArchived(request: RpcRequest<{}>):
+  Promise<RpcResponse<{ workspaces: WorkspaceView[]; archivedSessionIds: SessionId[] }>>
 
   /**
    * Creates (or idempotently resolves) a workspace over an EXISTING directory

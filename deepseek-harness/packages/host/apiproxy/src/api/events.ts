@@ -15,7 +15,7 @@ import type { JsonValue, SessionEvent, SessionId } from '@deepseek-ai/dsh-sessio
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools/presentation'
 import type { RpcError, RpcId, RpcRequest } from './rpc.ts'
 import type { JobView } from './jobs.ts'
-import type { WorkspaceView } from './workspace.ts'
+import type { WorkspaceId, WorkspaceView } from './workspace.ts'
 
 // Client-side consumers take the render-intent vocabulary from the contract;
 // dsh-tools remains its owner.
@@ -121,8 +121,10 @@ export type MuxFrame =
  * committed registration-deletion increment and never implies directory or
  * session-log deletion; workspace-order-changed pushes the complete durable
  * registry order after a reorder; archived-sessions-changed pushes the full registry
- * archive set after every durable change (same full-snapshot posture as
- * workspace-changed — `workspace.list` re-baselines it on reconnect).
+ * session archive set after every durable change and archived-workspaces-changed
+ * pushes the full registry workspace archive set after every durable change
+ * (same full-snapshot posture as workspace-changed — `workspace.list`
+ * re-baselines both on reconnect).
  */
 export type HostFrame =
   | {
@@ -141,6 +143,7 @@ export type HostFrame =
   | { type: 'host/workspace-removed'; workspaceId: WorkspaceView['workspaceId'] }
   | { type: 'host/workspace-order-changed'; workspaceIds: WorkspaceView['workspaceId'][] }
   | { type: 'host/archived-sessions-changed'; archivedSessionIds: SessionId[] }
+  | { type: 'host/archived-workspaces-changed'; archivedWorkspaceIds: WorkspaceId[] }
   /**
    * One allowlisted host cordis event forwarded verbatim. The allowlist is
    * owned by `@deepseek-ai/dsh-api-remotes` (`API_REMOTE_FORWARDED_EVENTS`),

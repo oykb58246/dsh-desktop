@@ -212,4 +212,57 @@ export class TestWorkspaces implements IWorkspaces {
       draft.archivedSessionIds = [...draft.archivedSessionIds, sessionId]
     })
   }
+
+  /**
+   * Unarchive a session (recorded). The default mirrors the production
+   * face's observable effect: the id leaves the list state's archive set.
+   * @param sessionId - session to unarchive.
+   */
+  async unarchiveSession(sessionId: SessionId): Promise<void> {
+    this.calls.push({ method: 'unarchiveSession', args: [sessionId] })
+    const stub = this.stubs.get('unarchiveSession')
+    if (stub !== undefined) {
+      await (stub(sessionId) as Promise<void>)
+      return
+    }
+    await this.update((draft) => {
+      draft.archivedSessionIds = draft.archivedSessionIds.filter(id => id !== sessionId)
+    })
+  }
+
+  /**
+   * Archive a Workspace (recorded). The default mirrors the production
+   * face's observable effect: the row leaves `items` and its id joins the
+   * workspace archive set.
+   * @param workspaceId - workspace to archive.
+   */
+  async archiveWorkspace(workspaceId: WorkspaceId): Promise<void> {
+    this.calls.push({ method: 'archiveWorkspace', args: [workspaceId] })
+    const stub = this.stubs.get('archiveWorkspace')
+    if (stub !== undefined) {
+      await (stub(workspaceId) as Promise<void>)
+      return
+    }
+    await this.update((draft) => {
+      draft.items = draft.items.filter(item => item.workspaceId !== workspaceId)
+      draft.archivedWorkspaceIds = [...draft.archivedWorkspaceIds, workspaceId]
+    })
+  }
+
+  /**
+   * Unarchive a Workspace (recorded; default no-op — the double has no
+   * archived workspace rows to restore).
+   * @param workspaceId - workspace to unarchive.
+   */
+  async unarchiveWorkspace(workspaceId: WorkspaceId): Promise<void> {
+    this.calls.push({ method: 'unarchiveWorkspace', args: [workspaceId] })
+    const stub = this.stubs.get('unarchiveWorkspace')
+    if (stub !== undefined) {
+      await (stub(workspaceId) as Promise<void>)
+      return
+    }
+    await this.update((draft) => {
+      draft.archivedWorkspaceIds = draft.archivedWorkspaceIds.filter(id => id !== workspaceId)
+    })
+  }
 }

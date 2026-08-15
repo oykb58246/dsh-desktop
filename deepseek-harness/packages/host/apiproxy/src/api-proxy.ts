@@ -25,7 +25,8 @@ import { isUserInvocable } from '@deepseek-ai/dsh-skill'
 import type { Workspace, WorkspaceRecord } from '@deepseek-ai/dsh-workspace'
 import {
   workspaceDomainState, workspaceRecord, WorkspaceId as brandWorkspaceId,
-  WorkspaceMoveInvalidError, WorkspaceOrderInvalidError, WorkspaceUnknownSessionError,
+  WorkspaceMoveInvalidError, WorkspaceOrderInvalidError,
+  WorkspaceUnknownSessionError, WorkspaceUnknownWorkspaceError,
 } from '@deepseek-ai/dsh-workspace'
 // Type-only: brings the `ctx.tools` Context merge into this program (viewFor reads presenters).
 import {
@@ -40,7 +41,7 @@ import type {
   ModelCatalogFailure, ModelProviderGroup,
   ModelReasoning, MuxFrame, PromptContentPart, QuestionResponsePayload, SessionListMetadata, SessionProjectionsBlock, SessionSearchItem,
   QueuedInboxItem, SessionSummary, SettingsNamespaceView, SubagentAddress, JobView, ToolEventView,
-  WorkspaceId, WorkspaceView,
+  WorkspaceId, WorkspaceListValue, WorkspaceView,
 } from './api/index.ts'
 import {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
@@ -89,6 +90,9 @@ import type { ApprovalOutcome, ApprovalRequestId } from '@deepseek-ai/dsh-user-a
 // Side-effect type import: resolves the `approval/request` waterfall and
 // `ctx.get('approval')` without a value dependency on the seam (optional composition).
 import type {} from '@deepseek-ai/dsh-user-approval'
+// Type-only: resolves `ctx.get('vision')` to the built-in vision bridge; the
+// bridge converts pasted images to text so text-only models may receive them.
+import type { VisionBridge } from '@deepseek-ai/dsh-vision-qwen'
 import { approvalResponsePayloadSchema } from './api/approvals.schema.ts'
 import { imageLimitsProjectionSchema, sessionListMetadataProjectionSchema } from './api/sessions.schema.ts'
 import { questionResponsePayloadSchema } from './api/questions.schema.ts'
@@ -234,6 +238,12 @@ function imageInEvent(event: SessionEvent, match: (ref: ImageAttachmentRef) => b
 /** True when the current model-visible surface contains an image. */
 function messagesHaveImage(messages: readonly { content: readonly ContentBlock[] }[]): boolean {
   return messages.some(message => contentHasImage(message.content))
+}
+
+/** The built-in vision bridge's current admission answer; absent or off keeps the strict image gates. */
+function visionAcceptsImages(ctx: Context): boolean {
+  const vision = ctx.get('vision') as VisionBridge | undefined
+  return vision?.enabled() === true
 }
 
 /** Resolve the first reference matching one opaque id. */
@@ -1718,6 +1728,24 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   }
 
   /**
+   * The workspace-list-shaped snapshot value shared by list/archive/unarchive:
+   * the visible (unarchived) workspace rows in durable registry order plus
+   * both registry-global archive sets. `workspace.list` re-baselines the
+   * client after reconnect, and each archive/unarchive echo carries the same
+   * full snapshot so a client installs the post-mutation state at once.
+   */
+  function workspaceSnapshotValue(): WorkspaceListValue {
+    const archivedWorkspaceIds = ctx.workspaceRegistry.archivedWorkspaceIds
+    return {
+      items: ctx.workspaceRegistry.list()
+        .filter(workspace => !archivedWorkspaceIds.includes(workspace.id))
+        .map(workspaceView),
+      archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds],
+      archivedWorkspaceIds: [...archivedWorkspaceIds],
+    }
+  }
+
+  /**
    * Build the session.list baseline shared by listing and search visibility.
    * Attached sessions come from memory; servable cold sessions merge from
    * persistence, and the final order is newest-first.
@@ -2294,7 +2322,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             })
             const pendingImage = [...found.agent.inbox.nextTurn, ...found.agent.inbox.nextStep]
               .some(message => contentHasImage(message.content))
-            if (pendingImage || messagesHaveImage(found.agent.session.deriveMessages())) {
+            if ((pendingImage || messagesHaveImage(found.agent.session.deriveMessages()))
+              && !visionAcceptsImages(ctx)) {
               const info = await ctx.llm.resolveModelInfo(resolved.provider, resolved.model)
               if (info.inputModalities !== undefined && !info.inputModalities.includes('image')) {
                 return err(request, {
@@ -2482,7 +2511,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const hasImage = content.some(part => part.type === 'image')
         const admit = async (): Promise<RpcResponse<{ accepted: true }>> => {
           try {
-            if (hasImage) {
+            if (hasImage && !visionAcceptsImages(ctx)) {
               const current = selectionFor(agent).current
               const modelInfo = await ctx.llm.resolveModelInfo(current.provider, current.model)
               if (modelInfo.inputModalities !== undefined && !modelInfo.inputModalities.includes('image')) {
@@ -2801,8 +2830,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
     workspace: {
       list(request) {
+        return Promise.resolve(ok(request, workspaceSnapshotValue()))
+      },
+
+      listArchived(request) {
         return Promise.resolve(ok(request, {
-          items: ctx.workspaceRegistry.list().map(workspaceView),
+          workspaces: ctx.workspaceRegistry.archivedWorkspaceIds.flatMap((workspaceId) => {
+            const workspace = ctx.workspaceRegistry.get(workspaceId)
+            return workspace === undefined ? [] : [workspaceView(workspace)]
+          }),
           archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds],
         }))
       },
@@ -2916,6 +2952,36 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: { sessionId },
           })
         }
+        return ok(request, { archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds] })
+      },
+
+      async archive(request) {
+        const { workspaceId } = request.payload
+        try {
+          await ctx.workspaceRegistry.archiveWorkspace(brandWorkspaceId(workspaceId))
+        } catch (error: unknown) {
+          // Only the registry's unknown-workspace rejection is the business
+          // code; storage/durability failures propagate as internal errors.
+          if (!(error instanceof WorkspaceUnknownWorkspaceError)) throw error
+          return workspaceNotFound(request, error.workspaceId)
+        }
+        return ok(request, workspaceSnapshotValue())
+      },
+
+      async unarchive(request) {
+        const { workspaceId } = request.payload
+        // The registry's unarchive of an unknown id is a silent no-op, but an
+        // absent registration is still a definite miss for the caller.
+        if (ctx.workspaceRegistry.get(brandWorkspaceId(workspaceId)) === undefined) {
+          return workspaceNotFound(request, workspaceId)
+        }
+        await ctx.workspaceRegistry.unarchiveWorkspace(brandWorkspaceId(workspaceId))
+        return ok(request, workspaceSnapshotValue())
+      },
+
+      async unarchiveSession(request) {
+        const { sessionId } = request.payload
+        await ctx.workspaceRegistry.unarchiveSession(sessionId)
         return ok(request, { archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds] })
       },
     },
@@ -3542,6 +3608,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // stream opens against the current set; workspace.list re-baselines
         // reconnecting clients, so only later changes need frames.
         let archivedSessionIds = ctx.workspaceRegistry.archivedSessionIds
+        let archivedWorkspaceIds = ctx.workspaceRegistry.archivedWorkspaceIds
         const disposers = [
           ctx.on('session/created', (session: Session) => {
             queue.push(frame({
@@ -3593,6 +3660,14 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
                 queue.push(frame({
                   type: 'host/archived-sessions-changed',
                   archivedSessionIds: [...state.archivedSessionIds],
+                }))
+              }
+              if (state.archivedWorkspaceIds.length !== archivedWorkspaceIds.length
+                || state.archivedWorkspaceIds.some((id, index) => id !== archivedWorkspaceIds[index])) {
+                archivedWorkspaceIds = state.archivedWorkspaceIds
+                queue.push(frame({
+                  type: 'host/archived-workspaces-changed',
+                  archivedWorkspaceIds: [...state.archivedWorkspaceIds],
                 }))
               }
               return

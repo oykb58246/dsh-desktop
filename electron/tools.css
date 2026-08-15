@@ -1,5 +1,14 @@
 /* DSH Desktop tools workbench — dark theme matching the injected chrome. */
 
+/*
+ * The `hidden` attribute must always win over the display rules below
+ * (.tool-stage, .progress-box, … set their own display). Without this, every
+ * stage of the workbench and the update download progress box render at once.
+ */
+[hidden] {
+  display: none !important;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -1313,4 +1322,204 @@ body {
   border-radius: 50%;
   background: #4d8bfd;
   box-shadow: 0 0 8px rgba(77, 139, 253, 0.95);
+}
+
+/* ---------- vision plugin panel ---------- */
+
+.config-strip--vision {
+  max-width: 720px;
+}
+
+.vision-switch {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #131b2a;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+}
+
+.vision-switch input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: #4d6bfe;
+  cursor: pointer;
+}
+
+.vision-switch__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vision-switch__copy strong {
+  font-size: 14px;
+  color: #eef3ff;
+}
+
+.vision-switch__copy small {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #8fa3c8;
+}
+
+.config-item--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.tools-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: #0c1322;
+  color: #eef3ff;
+  font: 13px "Cascadia Code", "Consolas", monospace;
+  outline: none;
+}
+
+.tools-input:focus {
+  border-color: #4d6bfe;
+}
+
+select.tools-input {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.vision-note {
+  margin-top: 16px;
+}
+
+.vision-note .done-card {
+  margin-top: 8px;
+}
+
+.vision-link {
+  color: #8ddcff;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(141, 220, 255, 0.4);
+}
+
+.vision-link:hover {
+  color: #bceaff;
+  border-bottom-color: #bceaff;
+}
+
+.stat-card strong.is-off {
+  color: #f09aa6;
+}
+
+/* ---------- archive management panel ---------- */
+
+.archive-hint {
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #8fa3c8;
+}
+
+.archive-section {
+  margin-bottom: 18px;
+}
+
+.archive-section .section-label {
+  margin-bottom: 8px;
+}
+
+.archive-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.archive-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #131b2a;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.archive-item__copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.archive-item__title {
+  font-size: 13.5px;
+  color: #eef3ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-item__meta {
+  font: 11.5px "Cascadia Code", "Consolas", monospace;
+  color: #8fa3c8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-item .button--mini {
+  flex: 0 0 auto;
+}
+
+.config-item__label .vision-link {
+  margin-left: 8px;
+  font-weight: 400;
+}
+
+.config-item .vision-hint {
+  display: block;
+  margin-top: 6px;
+  color: #7d97c4;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.config-strip--vision .vision-declare {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #a8c5f0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.config-strip--vision .vision-declare code {
+  font-family: Consolas, monospace;
+  color: #cfe2ff;
+}
+
+.config-item .vision-hint code {
+  font-family: Consolas, monospace;
+  color: #a8c5f0;
+}
+
+.config-item .vision-test-status {
+  align-self: center;
+  margin-left: 10px;
+  font-size: 12.5px;
+  color: #b1ceef;
+}
+
+.config-item .vision-test-status--ok {
+  color: #34d399;
+}
+
+.config-item .vision-test-status--fail {
+  color: #f09aa6;
 }

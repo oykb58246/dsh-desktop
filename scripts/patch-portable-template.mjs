@@ -63,6 +63,16 @@ if (patched.includes('; ---- DSH patch: keep the extraction dir as a cache for t
   )
 }
 
+// 4) Keep the splash visible while the store-mode payload is extracted. The
+//    stock template hides the window right after the splash, which reads as
+//    "the installer flashed and vanished" while ~400 MB is copied to temp.
+if (patched.includes('    HideWindow')) {
+  patched = patched.replace(
+    ['  !ifdef SPLASH_IMAGE', '    HideWindow', '  !endif'].join('\n'),
+    ['  !ifdef SPLASH_IMAGE', '    ; ---- DSH patch: splash stays visible while extracting ----', '  !endif'].join('\n'),
+  )
+}
+
 if (patched !== source) {
   await writeFile(target, patched)
   console.log('portable.nsi patched')

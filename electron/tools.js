@@ -11,7 +11,7 @@ const api = window.dshDesktop
 // ---------- state ----------
 
 const state = {
-  config: null, // { sessions: {customRoot, defaultRoot, effectiveRoot}, targetRoot }
+  config: null, // { sessions: {customRoot, defaultRoot, effectiveRoot} }
   projects: [], // [{ name, cwd, shallow, sessions: [...] }]
   importedCount: 0,
   projectChecked: new Map(), // cwd -> bool
@@ -27,6 +27,12 @@ const updateState = {
   checking: false,
   downloading: false,
   info: null, // last update:info snapshot
+}
+
+const visionState = {
+  loaded: false, // the persisted configuration has been read at least once
+  config: null, // { enabled, apiKey, baseURL, model }
+  busy: false,
 }
 
 const sessionKey = (session) => `${session.id}::${session.file}`
@@ -105,7 +111,6 @@ function renderConfig(config) {
   $('sessions-dir-badge').textContent = custom ? '自定义目录' : '自动检测'
   $('sessions-dir-badge').className = custom ? 'badge badge--warn' : 'badge badge--ok'
   $('reset-sessions-dir').disabled = !custom
-  $('target-path').textContent = config.targetRoot
 }
 
 // ---------- scan & render ----------
@@ -167,7 +172,7 @@ function renderProjects() {
     const group = document.createElement('div')
     group.className = 'project-group'
     const shallowBadge = project.shallow
-      ? '<span class="badge badge--warn" title="该目录层级过浅（如用户主目录），只导入会话，不复制项目代码">仅会话</span>'
+      ? '<span class="badge badge--warn" title="该目录层级过浅（如用户主目录），只导入会话，不注册工作区">仅会话</span>'
       : ''
     const importedInGroup = project.sessions.filter((s) => s.imported).length
     const importedBadge = importedInGroup > 0
@@ -384,23 +389,19 @@ function renderDone(results, skippedImported = 0) {
   for (const result of results) {
     const card = document.createElement('div')
     card.className = 'done-card'
-    const copyText = result.copy === null
-      ? '<span style="color:#8fa3c8">仅会话（未复制目录）</span>'
-      : result.copy?.error
-        ? `<span style="color:#f09aa6">复制失败：${escapeHtml(result.copy.error)}</span>`
-        : `已复制 ${result.copy?.files ?? 0} 个文件`
     const workspaceText = result.workspace === null
-      ? '—'
+      ? '仅会话（目录层级过浅，未注册工作区）'
       : result.workspace.ok
-        ? `工作区已注册${result.workspace.attached > 0 ? `，${result.workspace.attached} 个会话已归组` : ''}`
+        ? `已引用原始目录注册${result.workspace.attached > 0 ? `，${result.workspace.attached} 个会话已归组` : ''}`
         : `<span style="color:#f09aa6">${escapeHtml(result.workspace.error)}</span>`
     card.innerHTML = `
       <div class="done-card__head"><strong></strong><span class="badge badge--ok">完成</span></div>
       <div class="done-card__line"><b>项目：</b><span></span></div>
+      <div class="done-card__line"><b>原始目录：</b><span></span></div>
       <div class="done-card__line"><b>会话：</b><span></span></div>
       <div class="done-card__line"><b>工作区：</b><span></span></div>`
     card.querySelector('strong').textContent = result.name
-    card.querySelectorAll('.done-card__line span')[0].textContent = copyText
+    card.querySelectorAll('.done-card__line span')[0].textContent = result.cwd
     card.querySelectorAll('.done-card__line span')[1].textContent =
       `${result.written.length} 个写入，${result.skipped.length} 个跳过`
     card.querySelectorAll('.done-card__line span')[2].textContent = workspaceText
@@ -437,6 +438,12 @@ function switchTool(name) {
       // First open of the panel triggers one automatic baseline check.
       if (!updateState.checked) return runUpdateCheck()
     }).catch(() => {})
+  }
+  if (name === 'vision-plugin') {
+    void refreshVisionConfig()
+  }
+  if (name === 'archive-manage') {
+    void refreshArchive()
   }
 }
 
@@ -505,7 +512,11 @@ function renderUpdateInfo(info) {
 
   const downloaded = info.downloaded
   if (info.downloading === true) {
+    // A download is in flight (possibly started before this panel opened):
+    // show the progress box with neutral defaults — live progress events
+    // overwrite them as they arrive.
     $('update-progress-box').hidden = false
+    setUpdateProgress(0, '正在下载官方更新包…', '等待下载进度…')
     $('update-now').hidden = true
     $('update-apply').hidden = true
     $('update-cancel').hidden = false
@@ -587,6 +598,194 @@ async function applyUpdateNow() {
   }
 }
 
+// ---------- vision plugin panel ----------
+
+/** Read the persisted vision configuration into the panel (first open). */
+async function refreshVisionConfig() {
+  if (visionState.busy) return
+  try {
+    const config = await api.visionGetConfig()
+    visionState.config = config
+    visionState.loaded = true
+    renderVisionConfig()
+  } catch (error) {
+    showToast(`读取视觉插件配置失败：${error.message ?? String(error)}`, true)
+  }
+}
+
+function renderVisionConfig() {
+  const config = visionState.config
+  if (config === null) return
+  $('vision-enabled').checked = config.enabled !== false
+  $('vision-status').textContent = config.enabled === false ? '已关闭' : '已开启'
+  $('vision-status').classList.toggle('is-off', config.enabled === false)
+  $('vision-apikey').value = config.apiKey ?? ''
+  $('vision-baseurl').value = config.baseURL ?? ''
+  const model = config.model ?? 'qwen-vl-max'
+  $('vision-model').value = model
+  $('vision-model-name').textContent = model || '—'
+}
+
+async function saveVisionConfig() {
+  if (visionState.busy) return
+  visionState.busy = true
+  $('vision-save').disabled = true
+  try {
+    const next = {
+      enabled: $('vision-enabled').checked,
+      apiKey: $('vision-apikey').value.trim(),
+      baseURL: $('vision-baseurl').value.trim(),
+      model: $('vision-model').value.trim(),
+    }
+    visionState.config = await api.visionSetConfig(next)
+    renderVisionConfig()
+    showToast('视觉插件配置已保存并即时生效。')
+  } catch (error) {
+    showToast(`保存视觉插件配置失败：${error.message ?? String(error)}`, true)
+  } finally {
+    visionState.busy = false
+    $('vision-save').disabled = false
+  }
+}
+
+async function runVisionTest() {
+  const status = $('vision-test-status')
+  const button = $('vision-test')
+  button.disabled = true
+  status.textContent = '测试中…'
+  status.className = 'vision-test-status'
+  try {
+    const result = await api.visionTest({
+      apiKey: $('vision-apikey').value.trim(),
+      baseURL: $('vision-baseurl').value.trim(),
+      model: $('vision-model').value.trim(),
+    })
+    status.textContent = result.ok ? result.message : `失败：${result.message}`
+    status.className = result.ok ? 'vision-test-status vision-test-status--ok' : 'vision-test-status vision-test-status--fail'
+  } catch (error) {
+    status.textContent = `测试出错：${error.message ?? String(error)}`
+    status.className = 'vision-test-status vision-test-status--fail'
+  } finally {
+    button.disabled = false
+  }
+}
+
+function wireVisionPanel() {
+  $('vision-save').addEventListener('click', () => { void saveVisionConfig() })
+  $('vision-test').addEventListener('click', () => { void runVisionTest() })
+  $('vision-enabled').addEventListener('change', renderVisionConfig)
+  // Open attribution links in the system browser rather than inside the workbench.
+  for (const link of document.querySelectorAll('.vision-link')) {
+    link.addEventListener('click', (event) => {
+      event.preventDefault()
+      if (link.dataset.href) void api.openExternal(link.dataset.href)
+    })
+  }
+}
+
+// ---------- archive management panel ----------
+
+const archiveState = {
+  busy: false,
+}
+
+/** Read archived workspaces + sessions from the harness and render the panel. */
+async function refreshArchive() {
+  if (archiveState.busy) return
+  archiveState.busy = true
+  try {
+    const data = await api.archiveList()
+    renderArchive(data)
+  } catch (error) {
+    renderArchive({ workspaces: [], sessions: [] })
+    showToast(`读取归档列表失败：${error.message ?? String(error)}`, true)
+  } finally {
+    archiveState.busy = false
+  }
+}
+
+function renderArchive(data) {
+  const workspaces = data.workspaces ?? []
+  const sessions = data.sessions ?? []
+  const wsBox = $('archive-workspaces')
+  const ssBox = $('archive-sessions')
+  if (workspaces.length === 0) {
+    wsBox.innerHTML = '<div class="empty-note">暂无已归档的工作区</div>'
+  } else {
+    wsBox.innerHTML = ''
+    for (const workspace of workspaces) {
+      const row = document.createElement('div')
+      row.className = 'archive-item'
+      const count = Array.isArray(workspace.sessionIds) ? workspace.sessionIds.length : 0
+      row.innerHTML = `
+        <span class="archive-item__copy">
+          <span class="archive-item__title"></span>
+          <span class="archive-item__meta"></span>
+        </span>
+        <button class="button button--secondary button--mini" type="button">恢复</button>`
+      row.querySelector('.archive-item__title').textContent = workspace.title || workspace.workspaceId
+      row.querySelector('.archive-item__meta').textContent = `${workspace.path} · ${count} 个会话`
+      row.querySelector('button').addEventListener('click', () => {
+        void restoreWorkspace(workspace.workspaceId)
+      })
+      wsBox.appendChild(row)
+    }
+  }
+  if (sessions.length === 0) {
+    ssBox.innerHTML = '<div class="empty-note">暂无单独归档的会话</div>'
+  } else {
+    ssBox.innerHTML = ''
+    for (const session of sessions) {
+      const row = document.createElement('div')
+      row.className = 'archive-item'
+      row.innerHTML = `
+        <span class="archive-item__copy">
+          <span class="archive-item__title"></span>
+          <span class="archive-item__meta"></span>
+        </span>
+        <button class="button button--secondary button--mini" type="button">恢复</button>`
+      row.querySelector('.archive-item__title').textContent = session.title ?? session.sessionId
+      row.querySelector('.archive-item__meta').textContent = session.sessionId
+      row.querySelector('button').addEventListener('click', () => {
+        void restoreSession(session.sessionId)
+      })
+      ssBox.appendChild(row)
+    }
+  }
+}
+
+async function restoreWorkspace(workspaceId) {
+  if (archiveState.busy) return
+  archiveState.busy = true
+  try {
+    await api.archiveRestoreWorkspace(workspaceId)
+    showToast('已恢复工作区')
+  } catch (error) {
+    showToast(`恢复失败：${error.message ?? String(error)}`, true)
+  } finally {
+    archiveState.busy = false
+  }
+  await refreshArchive()
+}
+
+async function restoreSession(sessionId) {
+  if (archiveState.busy) return
+  archiveState.busy = true
+  try {
+    await api.archiveRestoreSession(sessionId)
+    showToast('已恢复会话')
+  } catch (error) {
+    showToast(`恢复失败：${error.message ?? String(error)}`, true)
+  } finally {
+    archiveState.busy = false
+  }
+  await refreshArchive()
+}
+
+function wireArchivePanel() {
+  $('archive-refresh').addEventListener('click', () => { void refreshArchive() })
+}
+
 // ---------- wiring ----------
 
 function wireChrome() {
@@ -625,6 +824,8 @@ function wire() {
   wireChrome()
   wireRail()
   wireUpdatePanel()
+  wireVisionPanel()
+  wireArchivePanel()
   $('refresh-scan').addEventListener('click', refreshAll)
   $('choose-sessions-dir').addEventListener('click', async () => {
     const config = await api.chooseSessionsRoot()
@@ -638,11 +839,6 @@ function wire() {
     renderConfig(config)
     showToast('已恢复默认会话目录')
     await refreshAll()
-  })
-  $('choose-target').addEventListener('click', async () => {
-    const config = await api.chooseTarget()
-    if (config === null) return
-    renderConfig(config)
   })
   $('run-import').addEventListener('click', runImport)
   $('search-input').addEventListener('input', (event) => {
@@ -658,15 +854,7 @@ function wire() {
   $('expand-all').addEventListener('click', () => setAllExpanded(true))
   $('collapse-all').addEventListener('click', () => setAllExpanded(false))
   api.onImportProgress((progress) => {
-    if (progress.kind === 'copy-progress') {
-      setProgress(
-        progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0,
-        `正在复制 ${progress.name}…`,
-        progress.file ? `${progress.done}/${progress.total} · ${progress.file}` : '准备中…',
-      )
-    } else if (progress.kind === 'copy-done') {
-      setProgress(100, `已复制 ${progress.project}`, `共 ${progress.files} 个文件`)
-    } else if (progress.kind === 'session-progress') {
+    if (progress.kind === 'session-progress') {
       setProgress(
         100,
         `正在写入会话 ${progress.project}…`,

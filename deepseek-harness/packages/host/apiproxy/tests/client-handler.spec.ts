@@ -81,13 +81,17 @@ function scriptedApi(overrides: {
       ...overrides.host,
     },
     workspace: {
-      list: r => ok(r, { items: [], archivedSessionIds: [] }),
+      list: r => ok(r, { items: [], archivedSessionIds: [], archivedWorkspaceIds: [] }),
+      listArchived: r => ok(r, { workspaces: [], archivedSessionIds: [] }),
       create: r => ok(r, { workspace: { workspaceId: 'w1' as never, path: '/t', title: 't', sessionIds: [], createdAt: '0', updatedAt: '0' }, created: true }),
       rename: r => ok(r, { workspace: { workspaceId: 'w1' as never, path: '/t', title: 't', sessionIds: [], createdAt: '0', updatedAt: '0' } }),
       delete: r => ok(r, { deleted: true as const }),
       insertBefore: r => ok(r, { workspaceIds: [r.payload.workspaceId] }),
       insertSessionBefore: r => ok(r, { workspace: { workspaceId: 'w1' as never, path: '/t', title: 't', sessionIds: [], createdAt: '0', updatedAt: '0' } }),
       archiveSession: r => ok(r, { archivedSessionIds: [r.payload.sessionId] }),
+      archive: r => ok(r, { items: [], archivedSessionIds: [], archivedWorkspaceIds: [r.payload.workspaceId] }),
+      unarchive: r => ok(r, { items: [], archivedSessionIds: [], archivedWorkspaceIds: [] }),
+      unarchiveSession: r => ok(r, { archivedSessionIds: [] }),
     },
     skills: { list: r => ok(r, { skills: [] }), ...overrides.skills },
     agentPresets: {
@@ -427,7 +431,7 @@ describe('workspace domain round trip', () => {
   it('routes both workspace methods through their handler rows and value schemas', async () => {
     const c = client(scriptedApi())
     const list = await c.workspace.list({})
-    expect(list.result).toEqual({ ok: true, value: { items: [], archivedSessionIds: [] } })
+    expect(list.result).toEqual({ ok: true, value: { items: [], archivedSessionIds: [], archivedWorkspaceIds: [] } })
     const created = await c.workspace.create({ path: '/t' })
     expect(created.result.ok).toBe(true)
     if (created.result.ok) expect(created.result.value.created).toBe(true)

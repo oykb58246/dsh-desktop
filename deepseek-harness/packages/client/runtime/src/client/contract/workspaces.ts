@@ -91,4 +91,23 @@ export interface IWorkspaces {
    * @param sessionId - session to archive.
    */
   archiveSession(sessionId: SessionId): Promise<void>
+  /**
+   * Remove a session from the registry-global archive set: it reappears in
+   * its workspace group (or the Ungrouped bucket) at its original position.
+   * @param sessionId - session to unarchive.
+   */
+  unarchiveSession(sessionId: SessionId): Promise<void>
+  /**
+   * Archive a Workspace: it and everything grouped under it disappear from
+   * the sidebar while its registration, session accounts, and logs remain,
+   * so unarchiveWorkspace restores it as-is.
+   * @param workspaceId - workspace to archive.
+   */
+  archiveWorkspace(workspaceId: WorkspaceId): Promise<void>
+  /**
+   * Unarchive a Workspace: it reappears in the sidebar at its original
+   * durable-order position, session account intact.
+   * @param workspaceId - workspace to unarchive.
+   */
+  unarchiveWorkspace(workspaceId: WorkspaceId): Promise<void>
 }

@@ -12,10 +12,8 @@ import { createRequire } from 'node:module'
 const require2 = createRequire(import.meta.url)
 const originalFs = require2('original-fs')
 import {
-  copyProjects,
   decodeSegment,
   importSessionFromRollout,
-  precheckImport,
   readSessionLogCwd,
   scanAllCodexSessions,
   defaultCodexSessionsRoot,
@@ -78,18 +76,206 @@ function kernelBundledVersion() {
 
 /**
  * Import configuration: the user-chosen Codex sessions root (null = auto
- * detect) and the Harness target directory receiving copied projects
- * (null = default `~/Documents/DSH-Harness-Projects`). Persisted as JSON
- * under the user data directory.
+ * detect). Persisted as JSON under the user data directory.
  */
 const codexImportConfigPath = path.join(app.getPath('userData'), 'codex-import-config.json')
 let codexSessionsCustomRoot = null
-let codexImportTargetRoot = null
 
-/** Default Harness target root for copied projects. */
-function defaultTargetRoot() {
-  return path.join(app.getPath('documents'), 'DSH-Harness-Projects')
+// ---------- vision plugin config (Qwen-VL bridge) ----------
+const visionConfigPath = path.join(app.getPath('userData'), 'vision-config.json')
+const DEFAULT_VISION_CONFIG = {
+  enabled: true,
+  apiKey: '',
+  baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  model: 'qwen-vl-max',
 }
+let visionConfig = { ...DEFAULT_VISION_CONFIG }
+
+/** Load the persisted vision-plugin configuration (best-effort). */
+async function loadVisionConfig() {
+  try {
+    const parsed = JSON.parse(await readFile(visionConfigPath, 'utf8'))
+    visionConfig = {
+      enabled: typeof parsed?.enabled === 'boolean' ? parsed.enabled : DEFAULT_VISION_CONFIG.enabled,
+      apiKey: typeof parsed?.apiKey === 'string' ? parsed.apiKey : '',
+      baseURL: typeof parsed?.baseURL === 'string' && parsed.baseURL.trim() !== ''
+        ? parsed.baseURL.trim()
+        : DEFAULT_VISION_CONFIG.baseURL,
+      model: typeof parsed?.model === 'string' && parsed.model.trim() !== ''
+        ? parsed.model.trim()
+        : DEFAULT_VISION_CONFIG.model,
+    }
+  } catch {
+    visionConfig = { ...DEFAULT_VISION_CONFIG }
+  }
+}
+
+/** Persist the vision-plugin configuration. */
+async function saveVisionConfig(next) {
+  visionConfig = next
+  await mkdir(path.dirname(visionConfigPath), { recursive: true })
+  await writeFile(visionConfigPath, JSON.stringify(visionConfig, null, 2))
+}
+
+/** The cordis.patch.yml row carrying the vision bridge's live configuration. */
+function visionPatchRow() {
+  return [
+    '- id: vision-qwen',
+    '  config:',
+    `    enabled: ${visionConfig.enabled === false ? 'false' : 'true'}`,
+    `    baseURL: ${JSON.stringify(visionConfig.baseURL)}`,
+    `    model: ${JSON.stringify(visionConfig.model)}`,
+  ]
+}
+
+/**
+ * Merge the generated vision row into a cordis.patch.yml text: an existing
+ * `- id: vision-qwen` row is replaced in place (its config block runs until
+ * the next top-level `- id:`); otherwise the row is appended.
+ */
+function mergeVisionPatchRow(text, lines) {
+  const rows = text.split(/\r?\n/u)
+  const start = rows.findIndex(line => line.trim() === '- id: vision-qwen')
+  if (start === -1) {
+    const trimmed = rows.filter(line => line.trim() !== '')
+    return [...trimmed, ...lines, ''].join('\n')
+  }
+  let end = start + 1
+  while (end < rows.length && !/^- id:/u.test(rows[end].trim())) end += 1
+  return [...rows.slice(0, start), ...lines, ...rows.slice(end)].join('\n')
+}
+
+/** Write/remove one KEY= line in a dotenv-style file, keeping the rest. */
+async function mergeEnvLine(filePath, key, value) {
+  let text = ''
+  try {
+    text = await readFile(filePath, 'utf8')
+  } catch {
+    // The file does not exist yet; the write below creates it.
+  }
+  const lines = text.split(/\r?\n/u)
+  const out = []
+  let replaced = false
+  for (const line of lines) {
+    if (line.startsWith(`${key}=`)) {
+      if (!replaced && value !== '') {
+        out.push(`${key}=${value}`)
+        replaced = true
+      }
+      continue
+    }
+    out.push(line)
+  }
+  if (!replaced && value !== '') out.push(`${key}=${value}`)
+  await mkdir(path.dirname(filePath), { recursive: true })
+  await writeFile(filePath, out.join('\n').replace(/\s+$/u, '') + '\n', 'utf8')
+}
+
+/** Write/remove one `KEY: value` line in a YAML map file, keeping the rest. */
+async function mergeYamlLine(filePath, key, value) {
+  let text = ''
+  try {
+    text = await readFile(filePath, 'utf8')
+  } catch {
+    // The file does not exist yet; the write below creates it.
+  }
+  const lines = text.split(/\r?\n/u)
+  const out = []
+  let replaced = false
+  for (const line of lines) {
+    if (line.startsWith(`${key}:`)) {
+      if (!replaced && value !== '') {
+        out.push(`${key}: ${value}`)
+        replaced = true
+      }
+      continue
+    }
+    out.push(line)
+  }
+  if (!replaced && value !== '') out.push(`${key}: ${value}`)
+  await mkdir(path.dirname(filePath), { recursive: true })
+  await writeFile(filePath, out.join('\n').replace(/\s+$/u, '') + '\n', 'utf8')
+}
+
+/**
+ * Push the current vision configuration into the Harness home: the
+ * cordis.patch.yml row and the DashScope key. The key goes into
+ * `$DSH_HOME/.credentials.yaml`, which the local credential provider watches
+ * live — so a changed key takes effect on the next turn without a restart;
+ * `$DSH_HOME/.env` keeps the same value as a boot-time fallback.
+ */
+async function applyVisionConfigToHarness() {
+  const patchPath = path.join(dshHomeDir, 'cordis.patch.yml')
+  let text = ''
+  try {
+    text = await readFile(patchPath, 'utf8')
+  } catch {
+    // First run: the file does not exist yet.
+  }
+  await mkdir(dshHomeDir, { recursive: true })
+  await writeFile(patchPath, mergeVisionPatchRow(text, visionPatchRow()), 'utf8')
+  const dashKey = visionConfig.apiKey.trim()
+  await mergeYamlLine(path.join(dshHomeDir, '.credentials.yaml'), 'DASHSCOPE_API_KEY', dashKey)
+  await mergeEnvLine(path.join(dshHomeDir, '.env'), 'DASHSCOPE_API_KEY', dashKey)
+}
+
+ipcMain.handle('vision:get-config', async () => ({ ...visionConfig }))
+
+ipcMain.handle('vision:set-config', async (_event, next) => {
+  const merged = {
+    enabled: typeof next?.enabled === 'boolean' ? next.enabled : visionConfig.enabled,
+    apiKey: typeof next?.apiKey === 'string' ? next.apiKey : visionConfig.apiKey,
+    baseURL: typeof next?.baseURL === 'string' && next.baseURL.trim() !== ''
+      ? next.baseURL.trim()
+      : visionConfig.baseURL,
+    model: typeof next?.model === 'string' && next.model.trim() !== ''
+      ? next.model.trim()
+      : visionConfig.model,
+  }
+  await saveVisionConfig(merged)
+  await applyVisionConfigToHarness()
+  return { ...merged }
+})
+
+/**
+ * Test the vision connection with the given (or persisted) key / address /
+ * model: one minimal OpenAI-protocol chat completion. Returns `{ ok, status,
+ * message }`; a failed key or endpoint surfaces the provider's error text.
+ */
+ipcMain.handle('vision:test', async (_event, next) => {
+  const key = (typeof next?.apiKey === 'string' ? next.apiKey : visionConfig.apiKey).trim()
+  const baseURL = (typeof next?.baseURL === 'string' && next.baseURL.trim() !== '' ? next.baseURL.trim() : visionConfig.baseURL)
+  const model = (typeof next?.model === 'string' && next.model.trim() !== '' ? next.model.trim() : visionConfig.model)
+  if (key === '') return { ok: false, message: '尚未填写 API Key' }
+  const url = `${baseURL.replace(/\/+$/u, '')}/chat/completions`
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(30_000),
+      redirect: 'error',
+    })
+    if (!response.ok) {
+      let message = `HTTP ${response.status}`
+      try {
+        const parsed = await response.json()
+        if (parsed?.error?.message) message = parsed.error.message
+      } catch {
+        // The status alone still identifies the failure.
+      }
+      return { ok: false, status: response.status, message }
+    }
+    return { ok: true, status: response.status, message: '连接成功：密钥与 API 地址有效' }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) }
+  }
+})
 
 /** Load the persisted import configuration (best-effort). */
 async function loadCodexImportConfig() {
@@ -98,18 +284,14 @@ async function loadCodexImportConfig() {
     if (typeof parsed?.customSessionsRoot === 'string' && parsed.customSessionsRoot.trim() !== '') {
       codexSessionsCustomRoot = parsed.customSessionsRoot.trim()
     }
-    if (typeof parsed?.targetRoot === 'string' && parsed.targetRoot.trim() !== '') {
-      codexImportTargetRoot = parsed.targetRoot.trim()
-    }
   } catch {
     codexSessionsCustomRoot = null
-    codexImportTargetRoot = null
   }
 }
 
 /** Persist the import configuration (or remove the file when fully default). */
 async function saveCodexImportConfig() {
-  if (codexSessionsCustomRoot === null && codexImportTargetRoot === null) {
+  if (codexSessionsCustomRoot === null) {
     try {
       await (await import('node:fs/promises')).rm(codexImportConfigPath, { force: true })
     } catch {
@@ -120,7 +302,6 @@ async function saveCodexImportConfig() {
   await mkdir(path.dirname(codexImportConfigPath), { recursive: true })
   await writeFile(codexImportConfigPath, JSON.stringify({
     ...(codexSessionsCustomRoot !== null ? { customSessionsRoot: codexSessionsCustomRoot } : {}),
-    ...(codexImportTargetRoot !== null ? { targetRoot: codexImportTargetRoot } : {}),
   }, null, 2))
 }
 
@@ -132,7 +313,6 @@ function codexImportConfigView() {
       defaultRoot: defaultCodexSessionsRoot(),
       effectiveRoot: codexSessionsCustomRoot ?? defaultCodexSessionsRoot(),
     },
-    targetRoot: codexImportTargetRoot ?? defaultTargetRoot(),
   }
 }
 
@@ -140,7 +320,7 @@ app.setAppUserModelId('com.oykb58246.dsh-desktop')
 
 // ---------- installer constants & modes ----------
 const APP_GUID = '2964e23e-3f18-500c-b3e7-68e9fa24df7a'
-const APP_VERSION = '0.1.0'
+const APP_VERSION = '0.1.1'
 const UNINSTALL_KEY = 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + APP_GUID
 const INI_PATH = 'C:\\dsh-desktop.ini'
 const INSTALL_LOG = 'C:\\dsh-desktop-install.log'
@@ -189,6 +369,26 @@ function sendStatus(headline, message = headline) {
   mainWindow.webContents.send('status', { headline, message })
 }
 
+/**
+ * Install a native text context menu (copy / paste / cut / select-all) on one
+ * window. Electron ships no default context menu, so without this right-click
+ * does nothing even where text is selectable.
+ * @param window - the BrowserWindow whose webContents gets the menu.
+ */
+function installContextMenu(window) {
+  window.webContents.on('context-menu', (_event, params) => {
+    const hasSelection = params.selectionText.trim().length > 0
+    const menu = Menu.buildFromTemplate([
+      { role: 'copy', label: '复制', enabled: hasSelection || params.isEditable },
+      { role: 'paste', label: '粘贴', enabled: params.isEditable },
+      { role: 'cut', label: '剪切', enabled: params.isEditable },
+      { type: 'separator' },
+      { role: 'selectAll', label: '全选' },
+    ])
+    menu.popup({ window })
+  })
+}
+
 function createWindow() {
   Menu.setApplicationMenu(null)
   mainWindow = new BrowserWindow({
@@ -223,6 +423,7 @@ function createWindow() {
     startupLog('main window ready-to-show')
     mainWindow?.show()
   })
+  installContextMenu(mainWindow)
   void mainWindow.loadFile(path.join(import.meta.dirname, 'loading.html'))
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -293,6 +494,52 @@ ipcMain.on('window-action', (event, action) => {
   }
 })
 
+ipcMain.handle('open-external', async (_event, url) => {
+  // Only http(s) URLs may leave the shell; anything else is refused.
+  if (!/^https?:\/\//u.test(String(url))) return false
+  await shell.openExternal(String(url))
+  return true
+})
+
+// ---------- archive management (harness workspace archive/restore) ----------
+
+/** Call one api-proxy domain method on the running harness, returning its value. */
+async function callHarnessRpc(method, payload) {
+  if (harnessUrl === null) throw new Error('DSH 服务尚未就绪')
+  const response = await fetch(`${harnessUrl}/api/${method}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      type: 'client-request',
+      rpcId: randomUUID(),
+      method,
+      payload: payload ?? {},
+    }),
+  })
+  const json = await response.json()
+  if (json?.result?.ok !== true) {
+    throw new Error(json?.result?.error?.message ?? `RPC ${method} 失败`)
+  }
+  return json.result.value
+}
+
+ipcMain.handle('archive:list', async () => {
+  // listArchived → { workspaces, archivedSessionIds }
+  const value = await callHarnessRpc('workspace.listArchived', {})
+  return {
+    workspaces: value.workspaces ?? [],
+    sessions: (value.archivedSessionIds ?? []).map(id => ({ sessionId: String(id) })),
+  }
+})
+
+ipcMain.handle('archive:restore-workspace', async (_event, workspaceId) => {
+  return await callHarnessRpc('workspace.unarchive', { workspaceId })
+})
+
+ipcMain.handle('archive:restore-session', async (_event, sessionId) => {
+  return await callHarnessRpc('workspace.unarchiveSession', { sessionId })
+})
+
 /**
  * Open (or focus) the standalone tools workbench window. Frameless, loads the
  * local tools.html through the same preload bridge; its own title bar
@@ -325,6 +572,7 @@ function openToolsWindow() {
   toolsWindow.on('closed', () => {
     toolsWindow = null
   })
+  installContextMenu(toolsWindow)
   toolsWindow.once('ready-to-show', () => toolsWindow?.show())
   void toolsWindow.loadFile(path.join(import.meta.dirname, 'tools.html'))
 }
@@ -380,7 +628,12 @@ ipcMain.handle('codex-import-scan-all', async () => {
   let importedCount = 0
   for (const project of scan.projects) {
     for (const session of project.sessions) {
-      session.imported = imported.has(session.id)
+      // A session counts as imported only when the stored log's cwd equals the
+      // Codex project directory. Legacy imports (copied into a Documents
+      // target) stored a different cwd, so they re-import under the new
+      // workspace-references-original-directory rules instead of being skipped.
+      const storedCwd = imported.get(session.id)
+      session.imported = storedCwd !== undefined && storedCwd === session.cwd
       if (session.imported) importedCount += 1
     }
   }
@@ -513,65 +766,25 @@ ipcMain.handle('codex-sessions-reset', async () => {
   return codexImportConfigView()
 })
 
-/** Choose (and persist) the Harness target directory for copied projects. */
-ipcMain.handle('codex-import-choose-target', async () => {
-  const picked = await pickToolsDirectory('选择 Harness 项目目录')
-  if (picked === null) return null
-  codexImportTargetRoot = picked
-  await saveCodexImportConfig()
-  return codexImportConfigView()
-})
-
 /**
- * One-shot import: copy the chosen projects into the target root, convert the
- * chosen Codex rollouts into dsh session logs, and register each copied
- * directory as a dsh workspace. Streams progress; resolves with per-project
- * results.
+ * One-shot import: register each chosen project's ORIGINAL directory as a dsh
+ * workspace (nothing is copied), convert the chosen Codex rollouts into dsh
+ * session logs rooted at that directory, and attach the sessions to the
+ * workspace. Streams progress; resolves with per-project results.
  */
 ipcMain.handle('codex-import-run', async (_event, { selection }) => {
-  const targetRoot = codexImportTargetRoot ?? defaultTargetRoot()
-  // Distinct cwds may share a basename (e.g. nested `src-tauri`); give each a
-  // unique target directory name so copies never collide.
-  const usedNames = new Map()
-  const uniqueSelection = selection.map((item) => {
-    const base = item.name || 'project'
-    let name = base
-    let suffix = 2
-    while (usedNames.has(name)) {
-      name = `${base}-${suffix}`
-      suffix += 1
-    }
-    usedNames.set(name, true)
-    return { ...item, name }
-  })
-
   const results = []
-  for (const item of uniqueSelection) {
-    const targetPath = path.join(targetRoot, item.name)
-    // Shallow groups (drive roots, the user profile, aggregate folders) are
-    // session-only: never copy the whole directory; sessions keep their
-    // original cwd and no workspace is registered.
-    let copy = null
-    if (!item.shallow) {
-      try {
-        const [copyResult] = await copyProjects(targetRoot, [{ name: item.name, absolutePath: item.cwd }], (progress) => {
-          sendToolsProgress({ kind: 'copy-progress', ...progress })
-        })
-        copy = copyResult
-      } catch (error) {
-        copy = { name: item.name, targetPath, files: 0, error: error instanceof Error ? error.message : String(error) }
-      }
-    }
-    sendToolsProgress({ kind: 'copy-done', project: item.name, files: copy?.files ?? 0 })
-
-    const sessionCwd = copy !== null ? targetPath : item.cwd
+  for (const item of selection) {
+    // The workspace references the original Codex project directory; sessions
+    // keep it as their cwd, so no files are ever copied.
+    const cwd = item.cwd
     const written = []
     const skipped = []
     for (const rollout of item.rollouts) {
       try {
         const outcome = await importSessionFromRollout({
           rollout: rollout.file,
-          cwd: sessionCwd,
+          cwd,
           sessionId: rollout.id || undefined,
           dshHome: dshHomeDir,
           onEvent: (event) => sendToolsProgress({ kind: 'session-progress', phase: event.kind, project: item.name, ...event }),
@@ -582,14 +795,16 @@ ipcMain.handle('codex-import-run', async (_event, { selection }) => {
       }
     }
 
+    // Shallow groups (drive roots, the user profile, aggregate folders) stay
+    // session-only: their cwd is not a project and is never registered.
     let workspace = null
-    if (harnessUrl !== null && copy !== null && copy.error === undefined) {
+    if (harnessUrl !== null && !item.shallow && typeof cwd === 'string' && cwd.trim() !== '') {
       try {
         const createBody = {
           type: 'client-request',
           rpcId: randomUUID(),
           method: 'workspace.create',
-          payload: { path: targetPath },
+          payload: { path: cwd },
         }
         const createResponse = await fetch(`${harnessUrl}/api/workspace.create`, {
           method: 'POST',
@@ -660,7 +875,7 @@ ipcMain.handle('codex-import-run', async (_event, { selection }) => {
       }
     }
 
-    results.push({ name: item.name, targetPath, copy, written, skipped, workspace })
+    results.push({ name: item.name, cwd, written, skipped, workspace })
   }
   return results
 })
@@ -746,6 +961,10 @@ async function launchHarness() {
   const env = {
     ...process.env,
     DSH_HOME: dshHome,
+    // The vision bridge resolves DASHSCOPE_API_KEY from the credential seam;
+    // the launch environment is its first layer, the written $DSH_HOME/.env
+    // its durable fallback.
+    ...(visionConfig.apiKey.trim() === '' ? {} : { DASHSCOPE_API_KEY: visionConfig.apiKey.trim() }),
   }
 
   sendStatus(statusText.start, statusText.startDetail)
@@ -833,6 +1052,8 @@ async function boot() {
   try {
     startupLog('boot: packaged=' + app.isPackaged + ' exe=' + process.execPath)
     await loadCodexImportConfig()
+    await loadVisionConfig()
+    await applyVisionConfigToHarness()
     await ensureHarnessReady()
     await launchHarness()
     // Non-blocking: compare against the official repository baseline so the
@@ -896,6 +1117,44 @@ function runPowershell(command) {
   })
 }
 
+/**
+ * Add or remove the Windows Defender exclusion for an install directory. The
+ * Go installer adds it so the freshly extracted app tree skips real-time
+ * scanning (the dominant cold-start cost); uninstall removes it. Best-effort:
+ * Defender may be absent, policy-managed, or superseded by a third-party AV.
+ * @param dir - the install directory.
+ * @param remove - true removes the exclusion, false adds it.
+ */
+function applyDefenderExclusion(dir, remove) {
+  const verb = remove ? 'Remove' : 'Add'
+  const escaped = String(dir).replace(/'/g, "''")
+  const command = `try { ${verb}-MpPreference -ExclusionPath '${escaped}' -ErrorAction Stop } catch {}`
+  try {
+    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { stdio: 'ignore', windowsHide: true })
+  } catch {
+    /* best-effort; the install/update still completes without it */
+  }
+}
+
+/**
+ * PIDs of processes whose executable lies under one directory (the install
+ * target). Escaping is single-quote doubling for the PowerShell string.
+ * @param dir - absolute install-target directory.
+ * @returns the matching process ids.
+ */
+async function runningProcessesUnder(dir) {
+  const escaped = dir.replace(/'/g, "''")
+  const out = await runPowershell(
+    `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and `
+    + `$_.ExecutablePath.ToLower().StartsWith('${escaped}'.TrimEnd('\\').ToLower() + '\\') } `
+    + `| Select-Object -ExpandProperty ProcessId`,
+  )
+  return out.split(/\r?\n/u)
+    .map(line => line.trim())
+    .filter(line => /^\d+$/u.test(line))
+    .map(Number)
+}
+
 async function runInstallerWorker() {
   const targetIndex = process.argv.indexOf('--installer-worker')
   const targetDir = process.argv[targetIndex + 1]
@@ -910,10 +1169,21 @@ async function runInstallerWorker() {
   try {
     write('phase', `install started; source=${sourceDir} target=${targetDir}`)
     await copyTreeWithProgress(sourceDir, targetDir, write)
+    // The bundled runtime lives inside the installer exe itself (appended by
+    // scripts/append-payload.mjs); the native loader hands its own path over
+    // via DSH_SETUP_EXE. Extract it straight to the target — one copy only.
+    const payloadExe = process.env.DSH_SETUP_EXE
+    if (payloadExe !== undefined && payloadExe !== '' && existsSync(payloadExe)) {
+      write('phase', 'extracting bundled runtime')
+      await extractRuntimePayload(payloadExe, targetDir, write)
+    }
     write('phase', 'files copied; creating shortcuts')
     await createShortcuts(targetDir, write)
     write('phase', 'registering application')
     await writeRegistry(targetDir, write)
+    // Keep the Defender exclusion from the original Go install in sync: an
+    // update writes the same directory, so (re-)adding is a no-op safeguard.
+    applyDefenderExclusion(targetDir, false)
     await originalFs.promises.writeFile(INI_PATH, `[DSH Desktop]\r\nInstallPath=${targetDir}\r\n`, 'utf8')
     write('phase', 'install complete')
     if (process.argv.includes('--relaunch')) {
@@ -946,7 +1216,7 @@ async function copyTreeWithProgress(sourceDir, targetDir, write) {
       const full = path.join(dir, entry.name)
       if (entry.isDirectory()) {
         await walk(full, rel + '\\')
-      } else if (entry.isFile()) {
+      } else if (entry.isFile() && entry.name !== '.dsh-shell-marker') {
         const stat = await originalFs.promises.stat(full)
         files.push({ rel, full, size: stat.size })
       }
@@ -985,6 +1255,58 @@ async function copyTreeWithProgress(sourceDir, targetDir, write) {
     }
   }
   write('progress', '100%')
+}
+
+/**
+ * Read the runtime payload section appended to the installer exe
+ * (`[runtime files][manifest][u32 len][DSHPLD01]`) and write every file under
+ * `<target>/resources/dsh-runtime`. This is the single copy that installs the
+ * bundled data — it comes straight out of the installer executable.
+ * @param exePath - the installer exe (the native loader) carrying the payload.
+ * @param targetDir - the installation directory.
+ * @param write - the log sink `(kind, text)`.
+ */
+async function extractRuntimePayload(exePath, targetDir, write) {
+  const handle = await originalFs.promises.open(exePath, 'r')
+  try {
+    const stat = await handle.stat()
+    if (stat.size < 12) throw new Error('installer exe is too small')
+    const tail = Buffer.alloc(12)
+    await handle.read(tail, 0, 12, stat.size - 12)
+    if (tail.subarray(4, 12).toString('utf8') !== 'DSHPLD01') {
+      throw new Error('runtime payload section missing from the installer exe')
+    }
+    const manifestLen = tail.readUInt32LE(0)
+    const manifestBuf = Buffer.alloc(manifestLen)
+    await handle.read(manifestBuf, 0, manifestLen, stat.size - 12 - manifestLen)
+    const manifest = JSON.parse(manifestBuf.toString('utf8'))
+    const files = Array.isArray(manifest?.files) ? manifest.files : []
+    const base = path.join(targetDir, 'resources', 'dsh-runtime')
+    const total = files.reduce((sum, file) => sum + (Number(file.size) || 0), 0)
+    let done = 0
+    let count = 0
+    let lastPercent = -1
+    for (const file of files) {
+      const dest = path.join(base, ...String(file.path).split('/'))
+      await originalFs.promises.mkdir(path.dirname(dest), { recursive: true })
+      const size = Number(file.size) || 0
+      const offset = Number(file.offset) || 0
+      const buf = Buffer.alloc(size)
+      await handle.read(buf, 0, size, offset)
+      await originalFs.promises.writeFile(dest, buf)
+      done += size
+      count += 1
+      write('file', path.join('resources', 'dsh-runtime', String(file.path)))
+      const percent = total > 0 ? Math.floor((done * 100) / total) : 100
+      if (percent !== lastPercent) {
+        lastPercent = percent
+        write('progress', `${percent}% (${count} files)`)
+      }
+    }
+    write('progress', '100%')
+  } finally {
+    await handle.close()
+  }
 }
 
 async function createShortcuts(targetDir, write) {
@@ -1084,6 +1406,38 @@ async function openInstallerWindow() {
   })
 
   ipcMain.handle('installer:start', async (_event, target) => {
+    // Dev preview (`--installer-ui`): the UI is reviewable but a real install
+    // requires the packaged worker, so refuse the action in dev mode.
+    if (!app.isPackaged) return 'dev-preview'
+    // Let the user decide whether to stop an already-running install/update
+    // target: the worker copies INTO `target`, and a running app from that
+    // directory locks its files. Only processes whose executable lives under
+    // the target are considered — the installer's own window (a temp-extracted
+    // copy) never matches, so it survives the cleanup.
+    const runningPids = await runningProcessesUnder(target)
+    if (runningPids.length > 0) {
+      const choice = await dialog.showMessageBox(installerWindow, {
+        type: 'question',
+        buttons: ['结束并继续', '取消'],
+        defaultId: 0,
+        cancelId: 1,
+        title: '检测到正在运行的 DSH Desktop',
+        message: `检测到 ${runningPids.length} 个 DSH Desktop 进程正在运行（安装目录：${target}）。`,
+        detail: '继续安装或更新前需要结束这些进程。是否立即结束它们并继续？',
+      })
+      if (choice.response !== 0) return 'cancelled'
+      for (const pid of runningPids) {
+        try { process.kill(pid) } catch { /* already gone */ }
+      }
+      // Grace period, then force-kill whatever survived.
+      await new Promise(resolve => setTimeout(resolve, 1500))
+      for (const pid of await runningProcessesUnder(target)) {
+        try {
+          execFileSync('taskkill', ['/PID', String(pid), '/F', '/T'], { stdio: 'ignore', windowsHide: true })
+        } catch { /* already gone */ }
+      }
+      await new Promise(resolve => setTimeout(resolve, 800))
+    }
     const exe = process.execPath
     const args = `--installer-worker "${target}"`
     // Clear the previous run's log so a stale "install complete" can never
@@ -1158,6 +1512,9 @@ async function runUninstallWorker() {
   log.open('w')
   try {
     log.write('phase', `uninstall started; target=${targetDir}`)
+    // Remove the Defender exclusion added at install time before deleting
+    // the tree, so no stale path exclusion is left behind.
+    applyDefenderExclusion(targetDir, true)
     await originalFs.promises.rm(targetDir, { recursive: true, force: true })
     await originalFs.promises.rm('C:\\Users\\Public\\Desktop\\DSH Desktop.lnk', { force: true })
     await originalFs.promises.rm('C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\DSH Desktop.lnk', { force: true })
@@ -1206,6 +1563,13 @@ app.whenReady().then(() => {
     },
     requestQuit: () => app.quit(),
   })
+  // Installer UI preview: `--installer-ui` opens the installer window in any
+  // mode (dev included) so the three-step flow can be reviewed without a real
+  // install. The install action itself stays guarded to packaged runs.
+  if (process.argv.includes('--installer-ui')) {
+    void openInstallerWindow()
+    return
+  }
   if (app.isPackaged && !isInstalledHere()) {
     void openInstallerWindow()
     return

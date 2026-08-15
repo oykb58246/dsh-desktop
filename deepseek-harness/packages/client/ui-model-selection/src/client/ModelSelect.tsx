@@ -23,6 +23,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelSelectInjected } from './slots.ts'
+import type { ModelKey } from './locales.ts'
 import css from './ModelSelect.module.css'
 
 /** Which pane the dropdown shows: the two-row root or one drilled-in list. */
@@ -34,6 +35,29 @@ interface EffortChoice {
   effort: string | undefined
   label: string
   description?: string
+}
+
+/**
+ * Localized names for the shared thinking vocabulary every adapter reports
+ * (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`, plus the `ultra`
+ * variant some adapters expose); ids outside the vocabulary keep the
+ * adapter-supplied name.
+ */
+const LOCALIZED_EFFORTS: Readonly<Record<string, ModelKey>> = {
+  off: 'effort.level.off',
+  minimal: 'effort.level.minimal',
+  low: 'effort.level.low',
+  medium: 'effort.level.medium',
+  high: 'effort.level.high',
+  xhigh: 'effort.level.xhigh',
+  max: 'effort.level.max',
+  ultra: 'effort.level.ultra',
+}
+
+/** The displayed name for one adapter-reported effort, localized for the shared vocabulary. */
+function effortName(t: (key: ModelKey) => string, effort: ModelReasoningEffort): string {
+  const key = LOCALIZED_EFFORTS[effort.id]
+  return key === undefined ? effort.name : t(key)
 }
 
 /**
@@ -86,7 +110,9 @@ export function ModelSelect(
     ? undefined
     : effectiveEffort === undefined
       ? t('effort.providerDefault')
-      : reasoning.efforts.find(level => level.id === effectiveEffort)?.name ?? effectiveEffort
+      : reasoning.efforts.find(level => level.id === effectiveEffort) === undefined
+        ? effectiveEffort
+        : effortName(t, reasoning.efforts.find(level => level.id === effectiveEffort)!)
   const effortChoices = useMemo<readonly EffortChoice[]>(() => reasoning === undefined
     ? []
     : [
@@ -96,7 +122,7 @@ export function ModelSelect(
       ...reasoning.efforts.map((effort: ModelReasoningEffort) => ({
         key: `effort:${effort.id}`,
         effort: effort.id,
-        label: effort.name,
+        label: effortName(t, effort),
         ...effort.description === undefined ? {} : { description: effort.description },
       })),
     ], [reasoning, t])

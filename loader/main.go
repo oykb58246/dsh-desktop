@@ -44,40 +44,43 @@ const (
 )
 
 const (
-	WS_POPUP         = 0x80000000
-	WS_VISIBLE       = 0x10000000
-	WS_CLIPCHILDREN  = 0x02000000
-	WS_CHILD         = 0x40000000
-	WS_TABSTOP       = 0x00010000
-	ES_AUTOHSCROLL   = 0x0080
-	CS_HREDRAW       = 0x0002
-	CS_VREDRAW       = 0x0001
-	SW_SHOW          = 5
-	SW_HIDE          = 0
-	WM_DESTROY       = 0x0002
-	WM_ERASEBKGND    = 0x0014
-	WM_LBUTTONDOWN   = 0x0201
-	WM_CLOSE         = 0x0010
-	WM_SYSCOMMAND    = 0x0112
-	WM_CTLCOLOREDIT  = 0x0133
-	WM_SETFONT       = 0x0030
-	WM_PAINT         = 0x000F
-	SC_MINIMIZE      = 0xF020
-	DIB_RGB_COLORS   = 0
-	SRCCOPY          = 0x00CC0020
-	TRANSPARENT      = 1
-	DT_CENTER        = 0x0001
-	DT_VCENTER       = 0x0004
-	DT_WORDBREAK     = 0x0010
-	DT_SINGLELINE    = 0x0020
-	SM_CXSCREEN      = 0
-	SM_CYSCREEN      = 1
+	WS_POPUP            = 0x80000000
+	WS_VISIBLE          = 0x10000000
+	WS_CLIPCHILDREN     = 0x02000000
+	WS_CHILD            = 0x40000000
+	WS_TABSTOP          = 0x00010000
+	ES_AUTOHSCROLL      = 0x0080
+	CS_HREDRAW          = 0x0002
+	CS_VREDRAW          = 0x0001
+	SW_SHOW             = 5
+	SW_HIDE             = 0
+	WM_DESTROY          = 0x0002
+	WM_ERASEBKGND       = 0x0014
+	WM_LBUTTONDOWN      = 0x0201
+	WM_CLOSE            = 0x0010
+	WM_SYSCOMMAND       = 0x0112
+	WM_CTLCOLOREDIT     = 0x0133
+	WM_SETFONT          = 0x0030
+	WM_PAINT            = 0x000F
+	EM_SETMARGINS       = 0x00D3
+	EC_LEFTMARGIN       = 0x0001
+	EC_RIGHTMARGIN      = 0x0002
+	SC_MINIMIZE         = 0xF020
+	DIB_RGB_COLORS      = 0
+	SRCCOPY             = 0x00CC0020
+	TRANSPARENT         = 1
+	DT_CENTER           = 0x0001
+	DT_VCENTER          = 0x0004
+	DT_WORDBREAK        = 0x0010
+	DT_SINGLELINE       = 0x0020
+	SM_CXSCREEN         = 0
+	SM_CYSCREEN         = 1
 	BIF_NEWDIALOGSTYLE  = 0x0040
 	BIF_RETURNONLYFSDIR = 0x0001
-	IMAGE_ICON       = 1
-	LR_LOADFROMFILE  = 0x00000010
-	ICON_SMALL       = 0
-	ICON_BIG         = 1
+	IMAGE_ICON          = 1
+	LR_LOADFROMFILE     = 0x00000010
+	ICON_SMALL          = 0
+	ICON_BIG            = 1
 )
 
 type fileEntry struct {
@@ -133,13 +136,30 @@ type bitMapInfoHeader struct {
 type bitMapInfo struct {
 	bmiHeader bitMapInfoHeader
 }
-type paintStruct struct {
-	hdc        uintptr
-	fErase     int32
-	rcPaint    rect
-	fRestore   int32
-	fIncUpdate int32
-	rgbReserved [32]byte
+
+// textMetric is the leading fields of TEXTMETRICW. Only tmHeight is used;
+// the rest keep the struct layout so GetTextMetricsW writes the right offset.
+type textMetric struct {
+	tmHeight           int32
+	tmAscent           int32
+	tmDescent          int32
+	tmInternalLeading  int32
+	tmExternalLeading  int32
+	tmAveCharWidth     int32
+	tmMaxCharWidth     int32
+	tmWeight           int32
+	tmOverhang         int32
+	tmDigitizedAspectX int32
+	tmDigitizedAspectY int32
+	tmFirstChar        uint16
+	tmLastChar         uint16
+	tmDefaultChar      uint16
+	tmBreakChar        uint16
+	tmItalic           byte
+	tmUnderlined       byte
+	tmStruckOut        byte
+	tmPitchAndFamily   byte
+	tmCharSet          byte
 }
 type browseInfo struct {
 	hwndOwner      uintptr
@@ -159,33 +179,29 @@ var (
 	shell32  = syscall.NewLazyDLL("shell32.dll")
 	ole32    = syscall.NewLazyDLL("ole32.dll")
 
-	procRegisterClassW     = user32.NewProc("RegisterClassW")
-	procCreateWindowExW    = user32.NewProc("CreateWindowExW")
-	procDefWindowProcW     = user32.NewProc("DefWindowProcW")
-	procGetMessageW        = user32.NewProc("GetMessageW")
-	procTranslateMessage   = user32.NewProc("TranslateMessage")
-	procDispatchMessageW   = user32.NewProc("DispatchMessageW")
-	procShowWindow         = user32.NewProc("ShowWindow")
-	procUpdateWindow       = user32.NewProc("UpdateWindow")
-	procGetDC              = user32.NewProc("GetDC")
-	procReleaseDC          = user32.NewProc("ReleaseDC")
-	procDrawTextW          = user32.NewProc("DrawTextW")
-	procGetSystemMetrics   = user32.NewProc("GetSystemMetrics")
-	procSetWindowRgn       = user32.NewProc("SetWindowRgn")
-	procFillRect           = user32.NewProc("FillRect")
-	procPostMessage        = user32.NewProc("PostMessageW")
-	procSendMessage        = user32.NewProc("SendMessageW")
-	procLoadImageW         = user32.NewProc("LoadImageW")
-	procSetWindowTextW     = user32.NewProc("SetWindowTextW")
-	procGetWindowTextW     = user32.NewProc("GetWindowTextW")
-	procGetClientRect      = user32.NewProc("GetClientRect")
-	procBeginPaint         = user32.NewProc("BeginPaint")
-	procEndPaint           = user32.NewProc("EndPaint")
-	procSetWindowLongPtrW  = user32.NewProc("SetWindowLongPtrW")
-	procCallWindowProcW    = user32.NewProc("CallWindowProcW")
-	procFindWindowW        = user32.NewProc("FindWindowW")
+	procRegisterClassW      = user32.NewProc("RegisterClassW")
+	procCreateWindowExW     = user32.NewProc("CreateWindowExW")
+	procDefWindowProcW      = user32.NewProc("DefWindowProcW")
+	procGetMessageW         = user32.NewProc("GetMessageW")
+	procTranslateMessage    = user32.NewProc("TranslateMessage")
+	procDispatchMessageW    = user32.NewProc("DispatchMessageW")
+	procShowWindow          = user32.NewProc("ShowWindow")
+	procUpdateWindow        = user32.NewProc("UpdateWindow")
+	procGetDC               = user32.NewProc("GetDC")
+	procReleaseDC           = user32.NewProc("ReleaseDC")
+	procDrawTextW           = user32.NewProc("DrawTextW")
+	procGetSystemMetrics    = user32.NewProc("GetSystemMetrics")
+	procSetWindowRgn        = user32.NewProc("SetWindowRgn")
+	procFillRect            = user32.NewProc("FillRect")
+	procPostMessage         = user32.NewProc("PostMessageW")
+	procSendMessage         = user32.NewProc("SendMessageW")
+	procLoadImageW          = user32.NewProc("LoadImageW")
+	procSetWindowTextW      = user32.NewProc("SetWindowTextW")
+	procGetWindowTextW      = user32.NewProc("GetWindowTextW")
+	procSetFocus            = user32.NewProc("SetFocus")
+	procFindWindowW         = user32.NewProc("FindWindowW")
 	procSetForegroundWindow = user32.NewProc("SetForegroundWindow")
-	procMessageBoxW        = user32.NewProc("MessageBoxW")
+	procMessageBoxW         = user32.NewProc("MessageBoxW")
 
 	procCreateRoundRectRgn = gdi32.NewProc("CreateRoundRectRgn")
 	procFillRgn            = gdi32.NewProc("FillRgn")
@@ -201,15 +217,16 @@ var (
 	procSetBkMode          = gdi32.NewProc("SetBkMode")
 	procSetBkColor         = gdi32.NewProc("SetBkColor")
 	procSetTextColor       = gdi32.NewProc("SetTextColor")
+	procGetTextMetricsW    = gdi32.NewProc("GetTextMetricsW")
 
-	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
+	procGetModuleHandleW    = kernel32.NewProc("GetModuleHandleW")
 	procGetDiskFreeSpaceExW = kernel32.NewProc("GetDiskFreeSpaceExW")
-	procGetCurrentProcess = kernel32.NewProc("GetCurrentProcess")
-	procCloseHandle = kernel32.NewProc("CloseHandle")
-	procCreateMutexW = kernel32.NewProc("CreateMutexW")
+	procGetCurrentProcess   = kernel32.NewProc("GetCurrentProcess")
+	procCloseHandle         = kernel32.NewProc("CloseHandle")
+	procCreateMutexW        = kernel32.NewProc("CreateMutexW")
 
-	advapi32  = syscall.NewLazyDLL("advapi32.dll")
-	procOpenProcessToken   = advapi32.NewProc("OpenProcessToken")
+	advapi32                = syscall.NewLazyDLL("advapi32.dll")
+	procOpenProcessToken    = advapi32.NewProc("OpenProcessToken")
 	procGetTokenInformation = advapi32.NewProc("GetTokenInformation")
 
 	procSHBrowseForFolder   = shell32.NewProc("SHBrowseForFolderW")
@@ -258,17 +275,16 @@ type button struct {
 }
 
 var (
-	hwnd          uintptr
-	bgDIB         uintptr
-	bgDC          uintptr
-	offDC         uintptr
-	offDIB        uintptr
-	editHwnd      uintptr
-	editBrush     uintptr
-	uiFont        uintptr
-	editWndProc   uintptr
-	paintMu       sync.Mutex
-	lastPaint     time.Time
+	hwnd      uintptr
+	bgDIB     uintptr
+	bgDC      uintptr
+	offDC     uintptr
+	offDIB    uintptr
+	editHwnd  uintptr
+	editBrush uintptr
+	uiFont    uintptr
+	paintMu   sync.Mutex
+	lastPaint time.Time
 
 	current       = pageDir
 	buttons       []button
@@ -290,6 +306,16 @@ var (
 
 	minBtn   = rect{winW - 84, 0, winW - 42, barH}
 	closeBtn = rect{winW - 42, 0, winW, barH}
+
+	// Visual path slot (parent-drawn). The native EDIT is shorter than this
+	// slot and sits vertically centered inside it — see editControlRect.
+	editSlot        = rect{90, 232, 560, 268}
+	editSlotX int32 = 90
+	editSlotY int32 = 232
+	editSlotW int32 = 470
+	editSlotH int32 = 36
+	editPadX  int32 = 12
+	editPadR  int32 = 4
 )
 
 func fmtBytes(n uint64) string {
@@ -581,6 +607,13 @@ func wndProc(h uintptr, message uint32, wParam, lParam uintptr) uintptr {
 			procPostMessage.Call(h, WM_SYSCOMMAND, SC_MINIMIZE, 0)
 			return 0
 		}
+		if current == pageDir && editHwnd != 0 &&
+			x >= editSlot.left && x < editSlot.right && y >= editSlot.top && y < editSlot.bottom {
+			// The native EDIT is shorter than the 36px slot; clicks on the
+			// top/bottom padding still belong to the path field.
+			procSetFocus.Call(editHwnd)
+			return 0
+		}
 		if current == pageDone && x >= 270 && x <= 520 && y >= 292 && y <= 318 {
 			launchChecked = !launchChecked
 			paintAll()
@@ -609,62 +642,65 @@ func loadIcon() uintptr {
 	return hicon
 }
 
+// editControlRect places a single-line EDIT inside the 36px visual slot so
+// the stock control can paint text and caret itself. Subclassing WM_PAINT
+// to DT_VCENTER the glyphs looks centered until the user clicks: the original
+// EDIT proc then GetDC-paints the same string at the default baseline, which
+// is the path-box ghosting this helper exists to avoid.
+func editControlRect(slotX, slotY, slotW, slotH, fontH int32) rect {
+	if fontH <= 0 {
+		fontH = 20
+	}
+	if fontH > slotH {
+		fontH = slotH
+	}
+	top := slotY + (slotH-fontH)/2
+	return rect{slotX, top, slotX + slotW, top + fontH}
+}
+
+func measureFontHeight(font uintptr) int32 {
+	if font == 0 || hwnd == 0 {
+		return 20
+	}
+	hdc := getDC(hwnd)
+	if hdc == 0 {
+		return 20
+	}
+	defer releaseDC(hwnd, hdc)
+	old, _, _ := procSelectObject.Call(hdc, font)
+	var tm textMetric
+	procGetTextMetricsW.Call(hdc, uintptr(unsafe.Pointer(&tm)))
+	procSelectObject.Call(hdc, old)
+	if tm.tmHeight <= 0 {
+		return 20
+	}
+	// A couple of extra pixels keep descenders / ClearType from clipping
+	// against the shorter native EDIT.
+	h := tm.tmHeight + 2
+	if h > editSlotH {
+		return editSlotH
+	}
+	return h
+}
+
 func createEditControl(hInst uintptr) uintptr {
+	uiFont = makeFont(15, false)
+	rc := editControlRect(editSlotX, editSlotY, editSlotW, editSlotH, measureFontHeight(uiFont))
 	clsName := utf16Ptr("EDIT")
 	edit, _, _ := procCreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(clsName)),
 		uintptr(unsafe.Pointer(utf16Ptr(installDir))),
 		WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL,
-		90, 232, 470, 36,
+		uintptr(rc.left), uintptr(rc.top), uintptr(rc.right-rc.left), uintptr(rc.bottom-rc.top),
 		hwnd, 0, hInst, 0,
 	)
 	if edit != 0 {
-		uiFont = makeFont(15, false)
 		procSendMessage.Call(edit, WM_SETFONT, uiFont, 1)
-		// 子类化 EDIT，接管 WM_PAINT 自行绘制文字，实现精确垂直居中。
-		editWndProc, _, _ = procSetWindowLongPtrW.Call(edit, ^uintptr(3), syscall.NewCallback(editSubclassProc))
+		margins := uintptr(uint32(editPadX) | uint32(editPadR)<<16)
+		procSendMessage.Call(edit, EM_SETMARGINS, EC_LEFTMARGIN|EC_RIGHTMARGIN, margins)
 	}
 	return edit
-}
-
-// editSubclassProc is the subclass window procedure for the path EDIT control.
-// It intercepts WM_PAINT so we can draw the text vertically centered; every
-// other message (focus, caret, keyboard, selection) is forwarded untouched.
-func editSubclassProc(h uintptr, message uint32, wParam, lParam uintptr) uintptr {
-	if message == WM_PAINT {
-		var ps paintStruct
-		hdc, _, _ := procBeginPaint.Call(h, uintptr(unsafe.Pointer(&ps)))
-		if hdc != 0 {
-			drawCenteredEditText(h, hdc)
-		}
-		procEndPaint.Call(h, uintptr(unsafe.Pointer(&ps)))
-		return 0
-	}
-	r, _, _ := procCallWindowProcW.Call(editWndProc, h, uintptr(message), wParam, lParam)
-	return r
-}
-
-// drawCenteredEditText fills the control background and draws the path text
-// vertically centered (DT_VCENTER), compensating the ascent-only ink offset.
-func drawCenteredEditText(edit, hdc uintptr) {
-	var rc rect
-	procGetClientRect.Call(edit, uintptr(unsafe.Pointer(&rc)))
-	br, _, _ := procCreateSolidBrush.Call(colEditBg)
-	procFillRect.Call(hdc, uintptr(unsafe.Pointer(&rc)), br)
-	procDeleteObject.Call(br)
-	buf := make([]uint16, 4096)
-	n, _, _ := procGetWindowTextW.Call(edit, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
-	if n == 0 {
-		return
-	}
-	if uiFont != 0 {
-		procSelectObject.Call(hdc, uiFont)
-	}
-	procSetBkMode.Call(hdc, TRANSPARENT)
-	procSetTextColor.Call(hdc, colHeading)
-	textRect := rect{rc.left + 12, rc.top, rc.right - 4, rc.bottom}
-	procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&buf[0])), ^uintptr(0), uintptr(unsafe.Pointer(&textRect)), DT_SINGLELINE|DT_VCENTER)
 }
 
 func createWindow() uintptr {

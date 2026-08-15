@@ -85,7 +85,8 @@ pnpm dist:win
   `taskkill /F /T` 并轮询至多 5s 等文件释放。「否」则中止安装。
 - 进度页：进度条（70,210,winW-70,224）+ 百分比 + 状态文字。
 - 完成页：✓ + 「安装完成」+「启动 DSH Desktop」复选框（默认勾选）。
-- **路径文字垂直居中**：单行 EDIT 需子类化接管 `WM_PAINT` 自绘（见踩坑 6）。
+- **路径文字垂直居中**：父窗口画 36px 输入槽，EDIT 按字体高度缩小后居中放入（见踩坑 6）。
+  **禁止**对 EDIT 接管 `WM_PAINT` 自绘。
 - **进度按文件数量统计**（`done / totalFiles`），**不是**按字节数——否则 21 个 shell 大文件
   会秒冲到 66%，然后 14337 个 runtime 小文件拖成龟速。
 - **复制进度封顶 99%**：文件复制完成后进入「正在初始化应用…」阶段（状态文字即此文案，
@@ -100,8 +101,12 @@ pnpm dist:win
 4. **`PostQuitMessage` 只对调用线程生效**：关窗口用 `PostMessage(hwnd, WM_CLOSE)`。
 5. **离屏/背景 DC 必须用窗口 DC 创建（`getDC(hwnd)`），不能用屏幕 DC（`getDC(0)`）**：
    屏幕 DC 派生的兼容 DC 与窗口 DC 不兼容，`BitBlt` 静默失败，整窗变黑只剩子控件。
-6. **单行 EDIT 文字垂直居中**：`EM_SETRECT` 只对多行 EDIT 有效；必须子类化 EDIT、
-   接管 `WM_PAINT`，用 `DrawTextW` + `DT_VCENTER` 自绘，其余消息转发原过程。
+6. **单行 EDIT 文字垂直居中**：`EM_SETRECT` 只对多行 EDIT 有效。**不要**子类化
+   接管 `WM_PAINT` 再 `DrawTextW` + `DT_VCENTER`——点击时原过程会再用 `GetDC`
+   在默认基线画一遍同一串文字，路径框出现重影。正确做法：父窗口画 36px 高的
+   输入槽，EDIT 本身按 `GetTextMetrics` 的单元格高度缩小并垂直居中放进槽里，
+   用 `EM_SETMARGINS` 做左右内边距，让系统自己画文字和 caret；点到槽的上下
+   留白时由父窗口 `SetFocus` 给 EDIT。
 7. **rcedit 只能 `--set-icon`**：Go 构建的 exe 无版本资源，版本字符串选项报
    "Unable to change version string"。
 8. **`go build` 要在 `loader/` 目录执行**，且 `icon.ico`、`installer-bg.png` 需先就位。

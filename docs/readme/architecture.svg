@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="Installer container layout">
+  <rect width="1280" height="360" rx="24" fill="#071226"/>
+  <text x="48" y="48" fill="#8eabff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13" font-weight="600" letter-spacing="2">INSTALLER EXE = LOADER + PAYLOAD</text>
+  <text x="48" y="82" fill="#f2f6ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="26" font-weight="700">一个文件，两段追加数据，安装时原样写出</text>
+
+  <!-- loader -->
+  <rect x="48" y="120" width="200" height="160" rx="16" fill="#4d6bfe"/>
+  <text x="148" y="188" text-anchor="middle" fill="#fff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">Go loader</text>
+  <text x="148" y="214" text-anchor="middle" fill="#dbe9ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">loader/main.go</text>
+  <text x="148" y="236" text-anchor="middle" fill="#dbe9ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">双击秒开 · Win32</text>
+
+  <!-- shell -->
+  <rect x="268" y="120" width="360" height="160" rx="16" fill="#12285c" stroke="#304a78"/>
+  <text x="448" y="176" text-anchor="middle" fill="#7f9df0" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12" font-weight="600">SHELL · DSHSHL01</text>
+  <text x="448" y="208" text-anchor="middle" fill="#f2f6ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="20" font-weight="700">Electron 壳 + app.asar</text>
+  <text x="448" y="236" text-anchor="middle" fill="#b1ceef" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">website/download/win-unpacked</text>
+  <text x="448" y="258" text-anchor="middle" fill="#7d97c4" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">安装到目标根目录</text>
+
+  <!-- runtime -->
+  <rect x="648" y="120" width="584" height="160" rx="16" fill="#0c1f42" stroke="#4d6bfe"/>
+  <text x="940" y="176" text-anchor="middle" fill="#7f9df0" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12" font-weight="600">RUNTIME · DSHPLD01</text>
+  <text x="940" y="208" text-anchor="middle" fill="#f2f6ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="20" font-weight="700">deepseek-harness 内核</text>
+  <text x="940" y="236" text-anchor="middle" fill="#b1ceef" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">output/dsh-runtime · 本地构建覆盖 npm 内核</text>
+  <text x="940" y="258" text-anchor="middle" fill="#7d97c4" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">安装到 &lt;target&gt;/resources/dsh-runtime</text>
+</svg>

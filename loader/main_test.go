@@ -38,14 +38,14 @@ func buildFakeInstaller(t *testing.T, dir string) string {
 
 	var buf []byte
 	buf = append(buf, loader...)
-	buf = append(buf, []byte("AAAA")...) // shell-a.txt content
+	buf = append(buf, []byte("AAAA")...)   // shell-a.txt content
 	buf = append(buf, []byte("BBBBBB")...) // sub/shell-b.txt content
 	buf = append(buf, shellManifest...)
 	len4 := make([]byte, 4)
 	binary.LittleEndian.PutUint32(len4, uint32(len(shellManifest)))
 	buf = append(buf, len4...)
 	buf = append(buf, magicShell...)
-	buf = append(buf, []byte("CCCCC")...) // rt-a.js content
+	buf = append(buf, []byte("CCCCC")...)   // rt-a.js content
 	buf = append(buf, []byte("DDDDDDD")...) // rt-dir/rt-b.js content
 	buf = append(buf, runtimeManifest...)
 	binary.LittleEndian.PutUint32(len4, uint32(len(runtimeManifest)))
@@ -57,6 +57,29 @@ func buildFakeInstaller(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestEditControlRectCentersInSlot(t *testing.T) {
+	rc := editControlRect(90, 232, 470, 36, 22)
+	if rc.left != 90 || rc.right != 560 {
+		t.Fatalf("horizontal box = {%d,%d}, want {90,560}", rc.left, rc.right)
+	}
+	if got := rc.bottom - rc.top; got != 22 {
+		t.Fatalf("height = %d, want 22", got)
+	}
+	if rc.top != 232+(36-22)/2 {
+		t.Fatalf("top = %d, want centered 239", rc.top)
+	}
+	// Font taller than the slot must clamp, not overflow the visual box.
+	clamped := editControlRect(90, 232, 470, 36, 40)
+	if clamped.top != 232 || clamped.bottom != 268 {
+		t.Fatalf("clamped = {%d,%d}, want {232,268}", clamped.top, clamped.bottom)
+	}
+	// Non-positive font height falls back to 20px, still centered.
+	fallback := editControlRect(90, 232, 470, 36, 0)
+	if fallback.bottom-fallback.top != 20 || fallback.top != 240 {
+		t.Fatalf("fallback = {%d,%d}, want 20px at y=240", fallback.top, fallback.bottom)
+	}
 }
 
 func TestInstallToPipeline(t *testing.T) {

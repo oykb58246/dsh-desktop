@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="Tools window">
+  <rect width="1280" height="360" rx="24" fill="#071226"/>
+  <rect x="40" y="28" width="1200" height="304" rx="18" fill="#0b1733" stroke="#1e3a6e"/>
+  <rect x="40" y="28" width="1200" height="40" rx="18" fill="#0c1f42"/>
+  <rect x="40" y="52" width="1200" height="16" fill="#0c1f42"/>
+  <circle cx="64" cy="48" r="5" fill="#4d6bfe"/>
+  <text x="80" y="53" fill="#eef3ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14" font-weight="600">工具区</text>
+  <text x="1188" y="53" text-anchor="end" fill="#cfe2ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">—  □  ×</text>
+
+  <rect x="56" y="84" width="220" height="228" rx="12" fill="#08152d"/>
+  <rect x="68" y="100" width="196" height="36" rx="8" fill="#4d6bfe"/>
+  <text x="84" y="123" fill="#fff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">Codex 项目导入</text>
+  <text x="84" y="167" fill="#b1ceef" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">检查更新</text>
+  <text x="84" y="203" fill="#b1ceef" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">视觉插件</text>
+  <text x="84" y="239" fill="#b1ceef" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">归档管理</text>
+
+  <rect x="292" y="84" width="928" height="228" rx="12" fill="#0a1a3a"/>
+  <text x="320" y="128" fill="#f2f6ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="22" font-weight="700">从 Codex 迁入工作区</text>
+  <text x="320" y="160" fill="#b1ceef" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">扫描项目标记 · 匹配 rollout 会话 · 注册为 Harness 工作区</text>
+  <rect x="320" y="188" width="260" height="72" rx="12" fill="#12285c" stroke="#304a78"/>
+  <text x="340" y="218" fill="#7f9df0" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">PROJECTS</text>
+  <text x="340" y="240" fill="#f2f6ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="16" font-weight="600">引用原目录，不复制文件</text>
+  <rect x="600" y="188" width="260" height="72" rx="12" fill="#12285c" stroke="#304a78"/>
+  <text x="620" y="218" fill="#7f9df0" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">SESSIONS</text>
+  <text x="620" y="240" fill="#f2f6ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="16" font-weight="600">jsonl.zstd 连续 seq</text>
+  <rect x="880" y="188" width="312" height="72" rx="12" fill="#12285c" stroke="#304a78"/>
+  <text x="900" y="218" fill="#7f9df0" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">VISION</text>
+  <text x="900" y="240" fill="#f2f6ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="16" font-weight="600">Qwen-VL · OpenAI 兼容</text>
+</svg>

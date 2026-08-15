@@ -18,7 +18,8 @@ import {
   scanAllCodexSessions,
   defaultCodexSessionsRoot,
 } from './codex-import.mjs'
-import { registerUpdateIpc, runBackgroundCheck } from './updater.mjs'
+import { registerUpdateIpc, runBackgroundCheck, compareVersions } from './updater.mjs'
+import { changelog } from './changelog.mjs'
 
 const desktopRoot = path.resolve(import.meta.dirname, '..')
 const harnessRoot = app.isPackaged
@@ -51,6 +52,11 @@ let harnessProcess = null
 let harnessUrl = null
 let stopping = false
 let loadingWindow = true
+
+// Changelog dialog payload staged in boot() and consumed by finishStartup
+// once the harness page is loaded: non-null means an install/update happened
+// since the last run and the dialog must be shown.
+let pendingChangelog = null
 
 const dshHomeDir = path.join(app.getPath('userData'), 'dsh-home')
 
@@ -880,6 +886,107 @@ ipcMain.handle('codex-import-run', async (_event, { selection }) => {
   return results
 })
 
+// ---------- changelog dialog (post install/update) ----------
+
+/** Path of the small JSON tracking the last version whose changelog was shown. */
+const seenVersionPath = path.join(app.getPath('userData'), 'seen-version.json')
+
+function readSeenVersion() {
+  try {
+    const parsed = JSON.parse(readFileSync(seenVersionPath, 'utf8'))
+    return typeof parsed?.version === 'string' ? parsed.version : null
+  } catch {
+    return null
+  }
+}
+
+function writeSeenVersion(version) {
+  try {
+    mkdirSync(path.dirname(seenVersionPath), { recursive: true })
+    writeFileSync(seenVersionPath, JSON.stringify({ version }), 'utf8')
+  } catch {
+    // A missing marker only means the dialog may show again next boot.
+  }
+}
+
+/** Dialog payload after an install/update: full changelog when fresh, nothing when up to date. */
+function changelogForTransition(prevVersion) {
+  if (prevVersion !== null && !changelog.some(entry => compareVersions(entry.version, prevVersion) > 0)) {
+    return null
+  }
+  return { entries: changelog, fresh: prevVersion === null }
+}
+
+/** Show the staged changelog dialog in the main window, then mark the version as seen. */
+async function maybeShowChangelog() {
+  const pending = pendingChangelog
+  pendingChangelog = null
+  if (pending === null) {
+    writeSeenVersion(APP_VERSION)
+    return
+  }
+  try {
+    await injectChangelogDialog(pending.entries, pending.fresh)
+    // Only persist after a successful injection so a transient failure retries
+    // on the next boot instead of silently dropping the announcement.
+    writeSeenVersion(APP_VERSION)
+  } catch (error) {
+    startupLog('changelog inject failed: ' + String(error))
+  }
+}
+
+/**
+ * Inject the changelog overlay into the harness page: current version on top,
+ * scrollable 历史更新日志 below, matching the window-chrome themes.
+ */
+async function injectChangelogDialog(entries, fresh) {
+  if (mainWindow === null || mainWindow.isDestroyed()) return
+  await mainWindow.webContents.executeJavaScript(`(() => {
+    if (document.getElementById('dsh-changelog-overlay')) return;
+    const data = ${JSON.stringify({ entries, fresh })};
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const sections = data.entries.map((e, i) => {
+      const divider = i === 1
+        ? '<div style="margin:4px 0 12px; padding-top:14px; border-top:1px solid rgba(255,255,255,.08); color:#7d97c4; font-size:12px; letter-spacing:.06em;">历史更新日志</div>'
+        : '';
+      const list = e.notes.map(n => '<li>' + esc(n) + '</li>').join('');
+      return divider
+        + '<div style="margin-bottom:16px;"><div style="font-weight:600; color:#d6e4ff;">v' + esc(e.version)
+        + ' <span style="color:#7d97c4; font-weight:400; font-size:12px; margin-left:6px;">' + esc(e.date) + ' · ' + esc(e.title) + '</span></div>'
+        + '<ul style="margin:6px 0 0; padding-left:18px; color:#c6d6f2;">' + list + '</ul></div>';
+    }).join('');
+    const overlay = document.createElement('div');
+    overlay.id = 'dsh-changelog-overlay';
+    overlay.innerHTML =
+      '<div style="position:fixed; left:0; right:0; top:42px; bottom:0; z-index:2147483646; display:flex; align-items:center; justify-content:center; background:rgba(4,10,24,.55);">'
+      + '<div style="width:560px; max-width:94vw; max-height:82%; display:flex; flex-direction:column; border-radius:14px; background:#101827; border:1px solid rgba(255,255,255,.1); color:#eef3ff; font:13px/1.65 \\'Segoe UI\\',\\'Microsoft YaHei\\',sans-serif; box-shadow:0 22px 60px rgba(0,0,0,.55); overflow:hidden;">'
+      + '<div style="padding:16px 20px 10px; border-bottom:1px solid rgba(255,255,255,.08);">'
+      + '<div style="font-size:15px; font-weight:600;">' + (data.fresh ? '欢迎使用 DSH Desktop' : 'DSH Desktop 已更新') + ' <span style="color:#8fb3ff;">v' + esc(data.entries[0].version) + '</span></div>'
+      + '<div style="color:#9fb4d8; font-size:12px; margin-top:2px;">' + (data.fresh ? '安装完成，本次发布内容如下：' : '更新完成，本次发布内容如下：') + '</div>'
+      + '</div>'
+      + '<div style="overflow-y:auto; padding:12px 20px 14px; flex:1;">' + sections + '</div>'
+      + '<div style="padding:10px 20px; border-top:1px solid rgba(255,255,255,.08); display:flex; justify-content:flex-end;">'
+      + '<button id="dsh-changelog-close" style="border:0; border-radius:8px; padding:7px 22px; font-size:13px; color:#fff; background:#4d6bfe; cursor:pointer;">知道了</button>'
+      + '</div></div></div>';
+    const style = document.createElement('style');
+    style.textContent =
+      'html.dsh-light #dsh-changelog-overlay > div { background:#f7f9fc; color:#17212b; border-color:rgba(23,33,43,.12); } '
+      + 'html.dsh-light #dsh-changelog-overlay ul { color:#3a4a63; } '
+      + 'html.dsh-light #dsh-changelog-overlay [style*="color:#d6e4ff"], html.dsh-light #dsh-changelog-overlay div { color:inherit; } '
+      + 'html.dsh-light #dsh-changelog-overlay div[style*="color:#7d97c4"], html.dsh-light #dsh-changelog-overlay div[style*="color:#9fb4d8"] { color:#6b7f9e; }';
+    document.head.appendChild(style);
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.querySelector('#dsh-changelog-close').addEventListener('click', close);
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay || event.target === overlay.firstElementChild) close();
+    });
+    document.addEventListener('keydown', function onKey(event) {
+      if (event.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
+    });
+  })()`)
+}
+
 async function injectWindowChrome() {
   if (mainWindow === null || mainWindow.isDestroyed()) return
   const iconSvg = readFileSync(appLogoPath).toString('base64')
@@ -1000,6 +1107,7 @@ async function launchHarness() {
           // from expanding and regaining its taskbar presence.
           startupLog('window chrome inject failed: ' + String(error))
         }
+        await maybeShowChangelog()
         expandMainWindow()
         resolve()
       }, reject)
@@ -1055,6 +1163,9 @@ async function boot() {
     await loadVisionConfig()
     await applyVisionConfigToHarness()
     await ensureHarnessReady()
+    // Stage the post-install/post-update changelog dialog before the harness
+    // page exists; finishStartup shows it once the page is loaded.
+    pendingChangelog = changelogForTransition(readSeenVersion())
     await launchHarness()
     // Non-blocking: compare against the official repository baseline so the
     // title-bar wrench can flag available updates.

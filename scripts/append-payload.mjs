@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { cp, open, readdir, readFile, stat, rm } from 'node:fs/promises'
 import path from 'node:path'
@@ -20,6 +22,12 @@ const finalExe = path.join(root, 'website', 'download', 'dsh-desktop-setup-x64.e
 
 const MAGIC_SHELL = 'DSHSHL01'
 const MAGIC_RUNTIME = 'DSHPLD01'
+
+async function sha256File(filePath) {
+  const hash = createHash('sha256')
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk)
+  return hash.digest('hex')
+}
 
 if (!(await stat(shellRoot)).isDirectory()) throw new Error(`shell dir missing: ${shellRoot}`)
 if (!(await stat(runtimeRoot)).isDirectory()) throw new Error(`runtime dir missing: ${runtimeRoot}`)
@@ -52,7 +60,10 @@ async function collect(dir) {
       const full = path.join(d, entry.name)
       const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`
       if (entry.isDirectory()) await walk(full, rel)
-      else if (entry.isFile()) files.push({ path: rel, full, size: (await stat(full)).size })
+      else if (entry.isFile()) {
+        const size = (await stat(full)).size
+        files.push({ path: rel, full, size, sha256: await sha256File(full) })
+      }
     }
   }
   await walk(dir, '')
@@ -67,7 +78,7 @@ const loader = await readFile(loaderExe)
 const shellManifest = { files: [] }
 let offset = loader.length
 for (const file of shellFiles) {
-  shellManifest.files.push({ path: file.path, offset, size: file.size })
+  shellManifest.files.push({ path: file.path, offset, size: file.size, sha256: file.sha256 })
   offset += file.size
 }
 const shellManifestBuf = Buffer.from(JSON.stringify(shellManifest))
@@ -76,7 +87,7 @@ const shellEnd = offset + shellManifestBuf.length + 4 + 8
 const runtimeManifest = { shellManifestLen: shellManifestBuf.length, files: [] }
 offset = shellEnd
 for (const file of runtimeFiles) {
-  runtimeManifest.files.push({ path: file.path, offset, size: file.size })
+  runtimeManifest.files.push({ path: file.path, offset, size: file.size, sha256: file.sha256 })
   offset += file.size
 }
 const runtimeManifestBuf = Buffer.from(JSON.stringify(runtimeManifest))

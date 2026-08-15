@@ -42,7 +42,7 @@ const NS = 'workspace'
  * provides a waitable service. apply therefore depends on each slot
  * declaration through `slots.inject()` instead of assuming order.
  */
-export const inject = ['slots', 'sessions', 'workspaces', 'locale']
+export const inject = ['slots', 'sessions', 'workspaces', 'locale', 'layout']
 
 /**
  * Register the browser and picker once their slot declarations are on the
@@ -70,8 +70,14 @@ export function apply(ctx: ClientContext): void {
   const browserInjected = (): WorkspaceBrowserInjected => ({
     // Explicit group actions keep their target; unscoped New Session inherits
     // the current Session Workspace before the recent-Workspace fallback.
-    startSession: (workspaceId) => { ctx.workspaces.startSession(workspaceId) },
-    open: (sessionId) => { ctx.sessions.open(sessionId) },
+    startSession: (workspaceId) => {
+      ctx.workspaces.startSession(workspaceId)
+      ctx.layout.collapseNarrowSidebar()
+    },
+    open: (sessionId) => {
+      ctx.sessions.open(sessionId)
+      ctx.layout.collapseNarrowSidebar()
+    },
     searchSessions,
     searchResultLimit: ctx.sessions.searchResultLimit,
     renameSession: async (sessionId, title) => {
@@ -84,7 +90,10 @@ export function apply(ctx: ClientContext): void {
     },
     forkSession: (sessionId) => {
       ctx.sessions.fork({ sessionId, increaseTitle: true })
-        .then((childId) => { ctx.sessions.open(childId) })
+        .then((childId) => {
+          ctx.sessions.open(childId)
+          ctx.layout.collapseNarrowSidebar()
+        })
         .catch(() => {
           // Fork or child-rename failure keeps the current selection.
         })

@@ -519,6 +519,11 @@ body {
   color: #f09aa6;
 }
 
+.badge--muted {
+  background: rgba(255, 255, 255, 0.06);
+  color: #8b97ad;
+}
+
 /* ---------- sessions directory block ---------- */
 
 .sessions-dir-block {
@@ -1624,4 +1629,65 @@ select.tools-input {
 
 .remote-links .empty-note {
   padding: 6px 2px;
+}
+
+/* ---------- plugin market ---------- */
+
+.plugin-intro {
+  margin: 0 0 14px;
+  color: #9aa7bf;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.plugin-intro code {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  color: #cfe2ff;
+}
+
+.plugin-section {
+  margin-bottom: 18px;
+}
+
+.plugin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plugin-card {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #101826;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.plugin-card__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.plugin-card__head strong {
+  font-size: 13.5px;
+}
+
+.plugin-card__desc,
+.plugin-card__spec {
+  color: #9aa7bf;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.plugin-card__spec {
+  margin-top: 4px;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  color: #7e8aa3;
+}
+
+.plugin-card__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
 }

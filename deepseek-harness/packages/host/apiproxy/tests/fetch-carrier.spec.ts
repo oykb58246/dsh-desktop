@@ -814,4 +814,35 @@ describe('resolveBase', () => {
       delete globalWithLocation.location
     }
   })
+
+  it('mints rpc ids from getRandomValues when randomUUID is absent', async () => {
+    const previous = globalThis.crypto
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        getRandomValues(bytes: Uint8Array) {
+          return bytes.fill(7)
+        },
+      },
+    })
+    try {
+      class Probe extends AbstractApiClient {
+        minted = ''
+        protected async doFetch(_input: URL): Promise<Response> {
+          return Response.json({ type: 'server-response', rpcId: this.minted, result: { ok: true, value: { items: [] } } })
+        }
+
+        protected override mintRpcId(): ReturnType<AbstractApiClient['mintRpcId']> {
+          const id = super.mintRpcId()
+          this.minted = id
+          return id
+        }
+      }
+      const probe = new Probe()
+      await probe.sessions.list({})
+      expect(probe.minted).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', { configurable: true, value: previous })
+    }
+  })
 })

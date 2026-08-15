@@ -308,8 +308,18 @@ export abstract class AbstractApiClient implements IApiClient {
   }
 
   protected mintRpcId(): RpcId {
-    // crypto.randomUUID is a Web API (browser + Node ≥19): keeps this base platform-neutral.
-    return RpcId(crypto.randomUUID())
+    // LAN `http://192.168.x.x` is not a secure context: browsers omit
+    // `crypto.randomUUID` there. `getRandomValues` remains available.
+    const webCrypto = globalThis.crypto
+    if (typeof webCrypto?.randomUUID === 'function') return RpcId(webCrypto.randomUUID())
+    if (typeof webCrypto?.getRandomValues === 'function') {
+      const bytes = webCrypto.getRandomValues(new Uint8Array(16))
+      bytes[6] = (bytes[6] & 0x0f) | 0x40
+      bytes[8] = (bytes[8] & 0x3f) | 0x80
+      const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+      return RpcId(`${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`)
+    }
+    return RpcId(`00000000-4000-8000-${Date.now().toString(16).padStart(12, '0').slice(-12)}`)
   }
 
   /**

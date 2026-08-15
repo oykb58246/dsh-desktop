@@ -80,6 +80,8 @@ pnpm dist:win
 - **自更新 worker**（`--installer-worker <目录> [--relaunch]`，由更新器以提权拉起）：**不是
   静默更新**——复用同一进度页（标题「正在更新」），完成后若带 `--relaunch` 经 explorer 以
   普通令牌启动新版并自动关窗；失败显示错误页并写 `C:\dsh-desktop-install.log`。
+- **增量覆盖**：payload manifest 带每文件 `sha256`。更新时若目标文件已存在且哈希一致则跳过写入，
+  只覆盖有改动的部分（首次安装仍会写出全部文件）。
 - **安装前进程检测**：点「安装」后（提权副本内）用 PowerShell CIM 枚举目标目录下运行的
   DSH Desktop 进程，有则 `MessageBoxW`（是/否，默认否）询问是否结束；「是」则
   `taskkill /F /T` 并轮询至多 5s 等文件释放。「否」则中止安装。

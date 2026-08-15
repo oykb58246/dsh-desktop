@@ -61,6 +61,18 @@ describe('createLayoutStore', () => {
     expect(store.getSnapshot().sidebar).toBe(400)
   })
 
+  it('collapseNarrowSidebar closes only the narrow overlay and leaves a wide sidebar open', () => {
+    const { store, actions } = createLayoutStore().create()
+    actions.setSidebar(400)
+    actions.collapseNarrowSidebar()
+    expect(store.getSnapshot()).toMatchObject({ sidebar: 400, narrowExpanded: false })
+    actions.setNarrow(true)
+    actions.toggleSidebar()
+    expect(store.getSnapshot().narrowExpanded).toBe(true)
+    actions.collapseNarrowSidebar()
+    expect(store.getSnapshot()).toEqual({ sidebar: 400, details: 0, narrow: true, narrowExpanded: false })
+  })
+
   it('crossing the breakpoint drops the override; a same-value setNarrow keeps it', () => {
     const { store, actions } = createLayoutStore().create()
     actions.setNarrow(true)

@@ -1,8 +1,8 @@
-version: 0.1.2
+version: 0.1.3
 files:
-  - url: https://github.com/oykb58246/dsh-desktop/releases/download/v0.1.2/dsh-desktop-setup-x64.exe
-    sha512: dYmU3+iJ+lLuTZebsmsbQWx7v5JeLqpZjfaa0GkhyyV+n66SqLiJu63/tbk6X7kxSjHk4a9RFfAtKLumpHlXPA==
-    size: 495282644
+  - url: https://github.com/oykb58246/dsh-desktop/releases/download/v0.1.3/dsh-desktop-setup-x64.exe
+    sha512: RWniG9KXiXzXqc2GTPHyh5m2FL4VVun9kW1g21PTbXCnYDnAOQGpzz6WzaVd196w3Ot/QQjy2+xzbZcq0/9aHQ==
+    size: 534605888
 path: dsh-desktop-setup-x64.exe
-sha512: dYmU3+iJ+lLuTZebsmsbQWx7v5JeLqpZjfaa0GkhyyV+n66SqLiJu63/tbk6X7kxSjHk4a9RFfAtKLumpHlXPA==
-releaseDate: '2026-08-15T17:10:09.101Z'
+sha512: RWniG9KXiXzXqc2GTPHyh5m2FL4VVun9kW1g21PTbXCnYDnAOQGpzz6WzaVd196w3Ot/QQjy2+xzbZcq0/9aHQ==
+releaseDate: '2026-08-15T22:52:28.196Z'

@@ -40,6 +40,27 @@ const HOP_BY_HOP = new Set([
 ])
 
 /**
+ * LAN `http://192.168.x.x` is not a secure context, so browsers omit
+ * `crypto.randomUUID`. The DSH web client mints every RPC id with it.
+ * Injected as a classic script before module graphs run.
+ */
+const UUID_POLYFILL_SCRIPT = '<script>(function(){var c=globalThis.crypto;if(!c||typeof c.randomUUID==="function")return;if(typeof c.getRandomValues!=="function")return;c.randomUUID=function(){var b=c.getRandomValues(new Uint8Array(16));b[6]=(b[6]&15)|64;b[8]=(b[8]&63)|128;var h=Array.from(b,function(x){return x.toString(16).padStart(2,"0")}).join("");return h.slice(0,8)+"-"+h.slice(8,12)+"-"+h.slice(12,16)+"-"+h.slice(16,20)+"-"+h.slice(20)};})();</script>'
+
+/**
+ * Narrow overlay drawer stays open after picking a session. Clicking the
+ * existing backdrop (same as tapping outside) closes it after the open lands.
+ */
+const MOBILE_SIDEBAR_SCRIPT = '<script>(function(){document.addEventListener("click",function(e){var t=e.target;if(!t||!t.closest)return;if(!document.querySelector("[data-sidebar-overlay]"))return;if(t.closest("[role=\\"menu\\"],[aria-haspopup=\\"menu\\"]"))return;if(!t.closest("[role=\\"treeitem\\"][aria-selected]"))return;setTimeout(function(){var frame=document.querySelector("[data-sidebar-overlay]");if(!frame)return;var bd=frame.querySelector("[aria-hidden=\\"true\\"]");if(bd)bd.click();},0);},true);})();</script>'
+
+/** Insert the LAN compatibility scripts at the start of `<head>`. */
+export function patchRemoteHtml(html) {
+  const snippet = UUID_POLYFILL_SCRIPT + MOBILE_SIDEBAR_SCRIPT
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (match) => match + snippet)
+  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (match) => match + snippet)
+  return snippet + html
+}
+
+/**
  * 常量时间比较；长度不同直接判否（timingSafeEqual 对长度敏感会抛错）。
  * @param a - 待比较的明文。
  * @param b - 真值。
@@ -425,8 +446,24 @@ export class RemoteControl {
     proxy.on('response', (proxyRes) => {
       const headers = { ...proxyRes.headers }
       for (const hop of HOP_BY_HOP) delete headers[hop]
-      res.writeHead(proxyRes.statusCode, headers)
-      proxyRes.pipe(res)
+      const type = String(headers['content-type'] ?? '')
+      const encoding = String(headers['content-encoding'] ?? '')
+      const html = type.includes('text/html') && (encoding === '' || encoding === 'identity')
+      if (!html) {
+        res.writeHead(proxyRes.statusCode, headers)
+        proxyRes.pipe(res)
+        return
+      }
+      const chunks = []
+      proxyRes.on('data', (chunk) => { chunks.push(chunk) })
+      proxyRes.on('end', () => {
+        const body = patchRemoteHtml(Buffer.concat(chunks).toString('utf8'))
+        const out = Buffer.from(body, 'utf8')
+        delete headers['content-length']
+        headers['content-length'] = String(out.length)
+        res.writeHead(proxyRes.statusCode, headers)
+        res.end(out)
+      })
     })
     proxy.on('error', () => {
       if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })

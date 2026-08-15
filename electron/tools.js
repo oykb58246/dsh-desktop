@@ -448,6 +448,9 @@ function switchTool(name) {
   if (name === 'remote-control') {
     void refreshRemote()
   }
+  if (name === 'plugin-market') {
+    void refreshPlugins()
+  }
 }
 
 // ---------- update check panel ----------
@@ -1015,6 +1018,162 @@ function wireUpdatePanel() {
   })
 }
 
+// ---------- plugin market panel ----------
+
+const pluginState = {
+  loaded: false,
+  busy: false,
+  installed: null,
+  catalog: [],
+}
+
+function setPluginStatus(kind, text) {
+  const box = $('plugin-status')
+  box.className = `update-status update-status--${kind}`
+  box.textContent = text
+}
+
+function renderInstalledPlugins(snapshot) {
+  const box = $('plugin-installed')
+  const rows = snapshot?.dependencies ?? []
+  if (rows.length === 0) {
+    box.innerHTML = '<div class="empty-note">web profile 还没有额外插件。可从下方目录安装，或在终端执行 <code>dsh plugin --profile web add github:owner/repo</code>。</div>'
+    return
+  }
+  box.replaceChildren()
+  for (const row of rows) {
+    const card = document.createElement('div')
+    card.className = 'plugin-card'
+    card.innerHTML = `
+      <div class="plugin-card__head">
+        <strong></strong>
+        <span class="badge ${row.bundle ? 'badge--ok' : 'badge--muted'}">${row.bundle ? 'bundle' : '依赖'}</span>
+      </div>
+      <div class="plugin-card__desc"></div>
+      <div class="plugin-card__actions">
+        <button class="button button--secondary button--mini" type="button" data-act="remove">卸载</button>
+      </div>`
+    card.querySelector('strong').textContent = row.name
+    card.querySelector('.plugin-card__desc').textContent = row.spec
+    card.querySelector('[data-act="remove"]').addEventListener('click', () => { void uninstallPlugin(row.name) })
+    box.appendChild(card)
+  }
+}
+
+function renderPluginCatalog(plugins, installedNames) {
+  const box = $('plugin-catalog')
+  box.replaceChildren()
+  if (!plugins || plugins.length === 0) {
+    box.innerHTML = '<div class="empty-note">没有匹配的插件。GitHub 搜索可能被限流，下方仍保留精选条目。</div>'
+    return
+  }
+  for (const plugin of plugins) {
+    const installed = installedNames.has(plugin.name) || installedNames.has(plugin.spec)
+    const card = document.createElement('div')
+    card.className = 'plugin-card'
+    const stars = typeof plugin.stars === 'number' ? `★ ${plugin.stars}` : (plugin.source === 'featured' ? '精选' : '')
+    card.innerHTML = `
+      <div class="plugin-card__head">
+        <strong></strong>
+        <span class="badge badge--muted"></span>
+      </div>
+      <div class="plugin-card__desc"></div>
+      <div class="plugin-card__spec"></div>
+      <div class="plugin-card__actions">
+        <button class="button button--secondary button--mini" type="button" data-act="open">打开仓库</button>
+        <button class="button button--primary button--mini" type="button" data-act="install"></button>
+      </div>`
+    card.querySelector('strong').textContent = plugin.repo || plugin.name
+    card.querySelector('.badge').textContent = stars || plugin.kind || 'plugin'
+    card.querySelector('.plugin-card__desc').textContent = plugin.description || '暂无简介'
+    card.querySelector('.plugin-card__spec').textContent = plugin.spec
+    const installBtn = card.querySelector('[data-act="install"]')
+    installBtn.textContent = installed ? '已安装' : '安装到 web profile'
+    installBtn.disabled = installed
+    card.querySelector('[data-act="open"]').addEventListener('click', () => {
+      const url = plugin.url || `https://github.com/${plugin.repo}`
+      void api.openExternal(url)
+    })
+    installBtn.addEventListener('click', () => { void installListedPlugin(plugin.spec) })
+    box.appendChild(card)
+  }
+}
+
+async function refreshPlugins(query) {
+  if (pluginState.busy) return
+  pluginState.busy = true
+  setPluginStatus('checking', '正在读取已安装插件与 GitHub dsh-plugin 主题…')
+  try {
+    const [installed, catalog] = await Promise.all([
+      api.pluginInstalled(),
+      api.pluginSearch(query ?? $('plugin-search').value.trim()),
+    ])
+    pluginState.installed = installed
+    pluginState.catalog = catalog.plugins ?? []
+    pluginState.loaded = true
+    const names = new Set((installed.dependencies ?? []).map((row) => row.name))
+    renderInstalledPlugins(installed)
+    renderPluginCatalog(pluginState.catalog, names)
+    if (catalog.error) {
+      setPluginStatus('warn', `GitHub 搜索受限：${catalog.error}。已展示精选插件。`)
+    } else {
+      setPluginStatus('ok', `已加载 ${pluginState.catalog.length} 个插件（精选 ${catalog.featured} · GitHub ${catalog.remote}）。安装后请重启主窗口。`)
+    }
+  } catch (error) {
+    setPluginStatus('error', `插件市场加载失败：${error.message ?? String(error)}`)
+  } finally {
+    pluginState.busy = false
+  }
+}
+
+async function installListedPlugin(spec) {
+  setPluginStatus('checking', `正在安装 ${spec}…`)
+  const result = await api.pluginInstall(spec)
+  if (result.ok) {
+    setPluginStatus('ok', `已安装 ${spec}。请重启主窗口使插件生效。`)
+    showToast('插件已安装，重启主窗口后生效')
+    await refreshPlugins()
+    return
+  }
+  setPluginStatus('error', result.error || '安装失败')
+  if (result.command) {
+    try { await navigator.clipboard.writeText(result.command) } catch { /* ignore */ }
+    showToast(`安装未完成，已复制命令：${result.command}`, true)
+  }
+}
+
+async function uninstallPlugin(name) {
+  setPluginStatus('checking', `正在卸载 ${name}…`)
+  const result = await api.pluginRemove(name)
+  if (result.ok) {
+    setPluginStatus('ok', `已卸载 ${name}。请重启主窗口。`)
+    showToast('插件已卸载')
+    await refreshPlugins()
+    return
+  }
+  setPluginStatus('error', result.error || '卸载失败')
+}
+
+function wirePluginPanel() {
+  $('plugin-refresh').addEventListener('click', () => { void refreshPlugins() })
+  $('plugin-search-btn').addEventListener('click', () => { void refreshPlugins() })
+  $('plugin-search').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') void refreshPlugins()
+  })
+}
+
+function wireUninstallPanel() {
+  $('uninstall-now').addEventListener('click', async () => {
+    $('uninstall-status').className = 'update-status update-status--checking'
+    $('uninstall-status').textContent = '即将拉起卸载脚本并退出应用…'
+    const result = await api.startUninstall()
+    if (result?.cancelled) {
+      $('uninstall-status').className = 'update-status'
+      $('uninstall-status').textContent = '已取消卸载。'
+    }
+  })
+}
+
 function wire() {
   wireChrome()
   wireRail()
@@ -1022,6 +1181,8 @@ function wire() {
   wireVisionPanel()
   wireArchivePanel()
   wireRemotePanel()
+  wirePluginPanel()
+  wireUninstallPanel()
   $('refresh-scan').addEventListener('click', refreshAll)
   $('choose-sessions-dir').addEventListener('click', async () => {
     const config = await api.chooseSessionsRoot()

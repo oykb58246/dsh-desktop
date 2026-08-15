@@ -543,7 +543,8 @@ describe('provider profile lifecycle', () => {
       messages: [],
     })
     // The declared value, not the canonical level name, goes on the wire.
-    expect(server.requests[0]).toMatchObject({ reasoning_effort: 'ultra' })
+    // Relays that read `effort` instead of `reasoning_effort` get the same spelling.
+    expect(server.requests[0]).toMatchObject({ reasoning_effort: 'ultra', effort: 'ultra' })
 
     const undeclared = await assemble(ctx, {
       provider: 'acme-gateway',
@@ -629,7 +630,7 @@ describe('provider profile lifecycle', () => {
     expect(server.requests[0]).toMatchObject({ reasoning_effort: 'none' })
   })
 
-  it('holds back reasoning_effort when the endpoint cannot take it', async () => {
+  it('still stamps effort fields when pi-ai would hold back reasoning_effort', async () => {
     vi.stubEnv('PI_TEST_KEY', 'test-key')
     const server = await mockServer([{ events: textEvents }])
     const ctx = new Context()
@@ -657,7 +658,40 @@ describe('provider profile lifecycle', () => {
       reasoningEffort: ReasoningEffortId('high'),
       messages: [],
     })
-    expect(server.requests[0]).not.toHaveProperty('reasoning_effort')
+    // The adapter still stamps both spellings so a Grok/relay endpoint that
+    // pi-ai would otherwise skip still sees the selected level.
+    expect(server.requests[0]).toMatchObject({ reasoning_effort: 'high', effort: 'high' })
+  })
+
+  it('sends effort xhigh on a grok-4.6 OpenAI-compat gateway', async () => {
+    vi.stubEnv('PI_TEST_KEY', 'test-key')
+    const server = await mockServer([{ events: textEvents }])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: {
+        xai: {
+          apiKeyEnv: 'PI_TEST_KEY',
+          api: 'openai-completions',
+          baseURL: `${server.url}/v1`,
+          models: [{
+            id: 'grok-4.6',
+            contextWindow: 500_000,
+            maxTokens: 128_000,
+            input: ['text', 'image'],
+            reasoningEfforts: { off: null, low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' },
+          }],
+        },
+      },
+    })
+
+    await assemble(ctx, {
+      provider: 'xai',
+      model: 'grok-4.6',
+      reasoningEffort: ReasoningEffortId('xhigh'),
+      messages: [],
+    })
+    expect(server.requests[0]).toMatchObject({ reasoning_effort: 'xhigh', effort: 'xhigh' })
   })
 
   it('accepts absent credentials for pi-ai ambient authentication', async () => {

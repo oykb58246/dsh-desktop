@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 contextBridge.exposeInMainWorld('dshDesktop', {
   onStatus(callback) {
@@ -12,6 +12,65 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   /** Open a URL in the system browser. */
   openExternal(url) {
     return ipcRenderer.invoke('open-external', String(url))
+  },
+  /** Resolve the real filesystem path of a File from paste/drop (Electron). */
+  getPathForFile(file) {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return typeof file?.path === 'string' ? file.path : ''
+    }
+  },
+  /** Native file picker; returns absolute paths. */
+  pickFiles(opts) {
+    return ipcRenderer.invoke('composer:pick-files', opts ?? {})
+  },
+  pluginInstalled() {
+    return ipcRenderer.invoke('plugin:installed')
+  },
+  pluginSearch(query) {
+    return ipcRenderer.invoke('plugin:search', query)
+  },
+  pluginLocal() {
+    return ipcRenderer.invoke('plugin:local')
+  },
+  pluginInstall(spec) {
+    return ipcRenderer.invoke('plugin:install', spec)
+  },
+  pluginRemove(name) {
+    return ipcRenderer.invoke('plugin:remove', name)
+  },
+  wsList() { return ipcRenderer.invoke('ws:list') },
+  wsTree(payload) { return ipcRenderer.invoke('ws:tree', payload) },
+  wsRead(payload) { return ipcRenderer.invoke('ws:read', payload) },
+  wsWrite(payload) { return ipcRenderer.invoke('ws:write', payload) },
+  wsReveal(payload) { return ipcRenderer.invoke('ws:reveal', payload) },
+  wsOpenExternal(payload) { return ipcRenderer.invoke('ws:open-external', payload) },
+  wsHistory(payload) { return ipcRenderer.invoke('ws:history', payload) },
+  wsRollback(payload) { return ipcRenderer.invoke('ws:rollback', payload) },
+  wsCheckpoint(payload) { return ipcRenderer.invoke('ws:checkpoint', payload) },
+  wsRestoreCheckpoint(payload) { return ipcRenderer.invoke('ws:restore-checkpoint', payload) },
+  termStart(payload) { return ipcRenderer.invoke('term:start', payload) },
+  termWrite(payload) { return ipcRenderer.invoke('term:write', payload) },
+  termStop() { return ipcRenderer.invoke('term:stop') },
+  onTermData(callback) {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('term:data', listener)
+    return () => ipcRenderer.removeListener('term:data', listener)
+  },
+  onTermExit(callback) {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('term:exit', listener)
+    return () => ipcRenderer.removeListener('term:exit', listener)
+  },
+  startUninstall() {
+    return ipcRenderer.invoke('app:uninstall')
+  },
+  revertFiles(changes) {
+    return ipcRenderer.invoke('dsh:file-revert', { changes })
+  },
+  openPath(filePath) {
+    return ipcRenderer.invoke('ws:reveal', { path: filePath })
   },
   /** Read the persisted import configuration (sessions root). */
   getImportConfig() {

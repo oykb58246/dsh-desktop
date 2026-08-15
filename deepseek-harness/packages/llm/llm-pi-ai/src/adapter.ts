@@ -78,11 +78,39 @@ export interface PiAiAdapterOptions {
   resolveAttachments?: () => AttachmentStore | undefined
 }
 
+/** The spelling dispatch should put on `reasoning_effort` / `effort`. */
+function reasoningWireSpelling(
+  model: Model<Api>,
+  reasoning: ModelThinkingLevel | undefined,
+): string | undefined {
+  if (reasoning === undefined || reasoning === 'off') return undefined
+  const mapped = model.thinkingLevelMap?.[reasoning]
+  if (mapped === null) return undefined
+  return typeof mapped === 'string' ? mapped : reasoning
+}
+
+/**
+ * Relays (and some Grok OpenAI-compat gateways) read `effort` rather than
+ * `reasoning_effort`. pi-ai also omits `reasoning_effort` when it guesses the
+ * endpoint is Grok (`xai` / `api.x.ai`). Put both fields on the payload so the
+ * selected level actually leaves the process.
+ */
+function withRelayEffortFields(
+  params: Record<string, unknown>,
+  model: Model<Api>,
+  reasoning: ModelThinkingLevel | undefined,
+): Record<string, unknown> {
+  const wire = reasoningWireSpelling(model, reasoning)
+  if (wire === undefined) return params
+  return { ...params, reasoning_effort: wire, effort: wire }
+}
+
 /** Copy profile stream knobs into pi-ai's common option vocabulary. */
 function profileOptions(
   profile: ResolvedPiAiProviderProfile,
   reasoning: ModelThinkingLevel | undefined,
   apiKey: string | undefined,
+  model: Model<Api>,
 ): SimpleStreamOptions {
   const enabledReasoning: ThinkingLevel | undefined = reasoning === 'off' ? undefined : reasoning
   return {
@@ -93,6 +121,7 @@ function profileOptions(
     ...profile.transport === undefined ? {} : { transport: profile.transport },
     ...profile.timeoutMs === undefined ? {} : { timeoutMs: profile.timeoutMs },
     ...profile.websocketConnectTimeoutMs === undefined ? {} : { websocketConnectTimeoutMs: profile.websocketConnectTimeoutMs },
+    onPayload: (params) => withRelayEffortFields(params as Record<string, unknown>, model, reasoning),
     // The agent recovery layer owns visible attempts; one adapter call is one SDK attempt.
     maxRetries: 0,
   }
@@ -311,7 +340,7 @@ export class PiAiAdapter extends LlmAdapter {
         ? toPiContext(options)
         : await toPiContext(options, attachments)
       const events = snapshot.models.streamSimple(model, context, {
-        ...profileOptions(profile, reasoning, apiKey),
+        ...profileOptions(profile, reasoning, apiKey, model),
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },

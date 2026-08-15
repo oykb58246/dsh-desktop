@@ -1,10 +1,11 @@
-import { app, BrowserWindow, Menu, shell, ipcMain, screen, dialog } from 'electron'
-import { existsSync, readFileSync, appendFileSync, mkdirSync, openSync, writeSync, closeSync } from 'node:fs'
+import { app, BrowserWindow, Menu, shell, ipcMain, screen, dialog, Tray, nativeImage } from 'electron'
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, openSync, writeSync, closeSync } from 'node:fs'
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { spawn, execFile, execFileSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
 import { scanCodexProjects } from './codex-projects.mjs'
 import { createRequire } from 'node:module'
 // original-fs bypasses Electron's asar virtual-fs patch; the install worker
@@ -21,6 +22,15 @@ import {
 import { registerUpdateIpc, runBackgroundCheck, compareVersions } from './updater.mjs'
 import { changelog } from './changelog.mjs'
 import { RemoteControl } from './remote-control.mjs'
+import { injectComposerAttach } from './composer-attach.mjs'
+import { injectCommandZh } from './command-zh.mjs'
+import { injectTurnChrome } from './turn-chrome.mjs'
+import { registerWorkspaceIpc } from './workspace-io.mjs'
+import { registerFileRevertIpc } from './file-revert.mjs'
+import { syncCompanionPlugins } from './companion-plugins.mjs'
+import {
+  listInstalledPlugins, searchPlugins, installPlugin, removePlugin, listLocalDrops,
+} from './plugin-market.mjs'
 
 const desktopRoot = path.resolve(import.meta.dirname, '..')
 const harnessRoot = app.isPackaged
@@ -60,9 +70,15 @@ let stopping = false
 let loadingWindow = true
 
 // Changelog dialog payload staged in boot() and consumed by finishStartup
-// once the harness page is loaded: non-null means an install/update happened
-// since the last run and the dialog must be shown.
+// once the harness page is loaded: non-null means first-open-of-day or
+// first-open-after-update.
 let pendingChangelog = null
+
+// Tray + close-action state. `allowQuit` lets a deliberate exit bypass the
+// "minimize or close" prompt; `tray` is created on first hide-to-tray.
+let tray = null
+let allowQuit = false
+const windowPrefsPath = path.join(app.getPath('userData'), 'window-prefs.json')
 
 // Web 远程控制服务（工具区面板驱动）：null 直到 boot 成功启动后创建。
 let remoteControl = null
@@ -342,6 +358,8 @@ const INSTALL_LOG = 'C:\\dsh-desktop-install.log'
 const isInstallerWorker = process.argv.includes('--installer-worker')
 const isUninstall = process.argv.includes('--uninstall')
 const isUninstallWorker = process.argv.includes('--uninstall-worker')
+const isAppInstance = !isInstallerWorker && !isUninstall && !isUninstallWorker
+const isSecondaryInstance = isAppInstance && !app.requestSingleInstanceLock()
 
 let startupLogPath = null
 function startupLog(line) {
@@ -430,6 +448,12 @@ function createWindow() {
     event.preventDefault()
   })
 
+  mainWindow.on('close', (event) => {
+    if (allowQuit || loadingWindow) return
+    event.preventDefault()
+    void handleMainClose()
+  })
+
   mainWindow.on('closed', () => {
     mainWindow = null
   })
@@ -486,6 +510,99 @@ function expandMainWindow() {
   tick()
 }
 
+function readWindowPrefs() {
+  try {
+    const parsed = JSON.parse(readFileSync(windowPrefsPath, 'utf8'))
+    return {
+      closeAction: parsed?.closeAction === 'tray' || parsed?.closeAction === 'quit'
+        ? parsed.closeAction
+        : null,
+    }
+  } catch {
+    return { closeAction: null }
+  }
+}
+
+function writeWindowPrefs(next) {
+  try {
+    mkdirSync(path.dirname(windowPrefsPath), { recursive: true })
+    writeFileSync(windowPrefsPath, JSON.stringify(next), 'utf8')
+  } catch {
+    /* a missing pref only means we ask again next time */
+  }
+}
+
+function ensureTray() {
+  if (tray !== null) return
+  const icon = nativeImage.createFromPath(appIconPath)
+  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon)
+  tray.setToolTip('DSH Desktop')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '显示主窗口', click: () => restoreMainWindow() },
+    { type: 'separator' },
+    { label: '卸载 DSH Desktop', click: () => { void requestUninstall() } },
+    { type: 'separator' },
+    { label: '退出', click: () => quitApp() },
+  ]))
+  tray.on('click', () => restoreMainWindow())
+}
+
+function restoreMainWindow() {
+  if (mainWindow === null || mainWindow.isDestroyed()) {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    return
+  }
+  mainWindow.setSkipTaskbar(false)
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function hideMainToTray() {
+  if (mainWindow === null || mainWindow.isDestroyed()) return
+  ensureTray()
+  mainWindow.setSkipTaskbar(true)
+  mainWindow.hide()
+}
+
+function quitApp() {
+  allowQuit = true
+  if (tray !== null) {
+    tray.destroy()
+    tray = null
+  }
+  app.quit()
+}
+
+async function handleMainClose() {
+  if (mainWindow === null || mainWindow.isDestroyed()) return
+  const prefs = readWindowPrefs()
+  if (prefs.closeAction === 'tray') {
+    hideMainToTray()
+    return
+  }
+  if (prefs.closeAction === 'quit') {
+    quitApp()
+    return
+  }
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    buttons: ['最小化到托盘', '直接关闭', '取消'],
+    defaultId: 0,
+    cancelId: 2,
+    title: '关闭 DSH Desktop',
+    message: '关闭窗口时要怎么处理？',
+    detail: '最小化到托盘后，DSH 会继续在后台运行；直接关闭会退出应用。',
+    checkboxLabel: '记住我的选择',
+    checkboxChecked: false,
+  })
+  if (result.response === 2) return
+  const action = result.response === 0 ? 'tray' : 'quit'
+  if (result.checkboxChecked) writeWindowPrefs({ closeAction: action })
+  if (action === 'tray') hideMainToTray()
+  else quitApp()
+}
+
 ipcMain.on('window-action', (event, action) => {
   const window = BrowserWindow.fromWebContents(event.sender)
   if (window === null || window.isDestroyed()) return
@@ -499,6 +616,14 @@ ipcMain.on('window-action', (event, action) => {
     else window.maximize()
   }
   if (action === 'close') {
+    if (window === mainWindow) {
+      if (loadingWindow) {
+        quitApp()
+        return
+      }
+      void handleMainClose()
+      return
+    }
     const closingTools = window === toolsWindow
     window.close()
     // Closing the tools window returns focus to the main harness window.
@@ -515,6 +640,35 @@ ipcMain.handle('open-external', async (_event, url) => {
   await shell.openExternal(String(url))
   return true
 })
+
+ipcMain.handle('composer:pick-files', async (event, opts) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  const images = opts?.images === true
+  const result = await dialog.showOpenDialog(window ?? mainWindow, {
+    title: images ? '选择图片' : '选择附件',
+    properties: ['openFile', 'multiSelections'],
+    filters: images
+      ? [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
+      : [{ name: 'All Files', extensions: ['*'] }],
+  })
+  return result.canceled ? [] : result.filePaths
+})
+
+ipcMain.handle('plugin:installed', () => listInstalledPlugins(dshHomeDir))
+ipcMain.handle('plugin:search', (_event, query) => searchPlugins(query))
+ipcMain.handle('plugin:local', () => listLocalDrops(dshHomeDir))
+ipcMain.handle('plugin:install', (_event, spec) => installPlugin({
+  packaged: app.isPackaged,
+  harnessEntry,
+  harnessRoot,
+  dshHome: dshHomeDir,
+}, spec))
+ipcMain.handle('plugin:remove', (_event, name) => removePlugin({
+  packaged: app.isPackaged,
+  harnessEntry,
+  harnessRoot,
+  dshHome: dshHomeDir,
+}, name))
 
 // ---------- archive management (harness workspace archive/restore) ----------
 
@@ -978,33 +1132,50 @@ ipcMain.handle('codex-import-run', async (_event, { selection }) => {
 
 // ---------- changelog dialog (post install/update) ----------
 
-/** Path of the small JSON tracking the last version whose changelog was shown. */
+/** Path of the small JSON tracking the last changelog show (version + local date). */
 const seenVersionPath = path.join(app.getPath('userData'), 'seen-version.json')
 
-function readSeenVersion() {
+function todayStamp() {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}
+
+function readSeenChangelog() {
   try {
     const parsed = JSON.parse(readFileSync(seenVersionPath, 'utf8'))
-    return typeof parsed?.version === 'string' ? parsed.version : null
+    return {
+      version: typeof parsed?.version === 'string' ? parsed.version : null,
+      shownOn: typeof parsed?.shownOn === 'string' ? parsed.shownOn : null,
+    }
   } catch {
-    return null
+    return { version: null, shownOn: null }
   }
 }
 
-function writeSeenVersion(version) {
+function writeSeenChangelog(version, shownOn) {
   try {
     mkdirSync(path.dirname(seenVersionPath), { recursive: true })
-    writeFileSync(seenVersionPath, JSON.stringify({ version }), 'utf8')
+    writeFileSync(seenVersionPath, JSON.stringify({ version, shownOn }), 'utf8')
   } catch {
     // A missing marker only means the dialog may show again next boot.
   }
 }
 
-/** Dialog payload after an install/update: full changelog when fresh, nothing when up to date. */
-function changelogForTransition(prevVersion) {
-  if (prevVersion !== null && !changelog.some(entry => compareVersions(entry.version, prevVersion) > 0)) {
-    return null
-  }
-  return { entries: changelog, fresh: prevVersion === null }
+/**
+ * Show the changelog on the first open of the local day, or the first open
+ * after the app version changed (install / update). Later launches the same
+ * day stay quiet.
+ */
+function changelogForLaunch() {
+  const seen = readSeenChangelog()
+  const today = todayStamp()
+  const updated = seen.version === null || compareVersions(APP_VERSION, seen.version) !== 0
+  const firstToday = seen.shownOn !== today
+  if (!updated && !firstToday) return null
+  const kind = seen.version === null ? 'fresh' : updated ? 'update' : 'daily'
+  return { entries: changelog, kind }
 }
 
 /** Show the staged changelog dialog in the main window, then mark the version as seen. */
@@ -1012,14 +1183,14 @@ async function maybeShowChangelog() {
   const pending = pendingChangelog
   pendingChangelog = null
   if (pending === null) {
-    writeSeenVersion(APP_VERSION)
+    writeSeenChangelog(APP_VERSION, todayStamp())
     return
   }
   try {
-    await injectChangelogDialog(pending.entries, pending.fresh)
+    await injectChangelogDialog(pending.entries, pending.kind)
     // Only persist after a successful injection so a transient failure retries
     // on the next boot instead of silently dropping the announcement.
-    writeSeenVersion(APP_VERSION)
+    writeSeenChangelog(APP_VERSION, todayStamp())
   } catch (error) {
     startupLog('changelog inject failed: ' + String(error))
   }
@@ -1029,11 +1200,11 @@ async function maybeShowChangelog() {
  * Inject the changelog overlay into the harness page: current version on top,
  * scrollable 历史更新日志 below, matching the window-chrome themes.
  */
-async function injectChangelogDialog(entries, fresh) {
+async function injectChangelogDialog(entries, kind) {
   if (mainWindow === null || mainWindow.isDestroyed()) return
   await mainWindow.webContents.executeJavaScript(`(() => {
     if (document.getElementById('dsh-changelog-overlay')) return;
-    const data = ${JSON.stringify({ entries, fresh })};
+    const data = ${JSON.stringify({ entries, kind })};
     const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const sections = data.entries.map((e, i) => {
       const divider = i === 1
@@ -1051,8 +1222,8 @@ async function injectChangelogDialog(entries, fresh) {
       '<div style="position:fixed; left:0; right:0; top:42px; bottom:0; z-index:2147483646; display:flex; align-items:center; justify-content:center; background:rgba(4,10,24,.55);">'
       + '<div style="width:560px; max-width:94vw; max-height:82%; display:flex; flex-direction:column; border-radius:14px; background:#101827; border:1px solid rgba(255,255,255,.1); color:#eef3ff; font:13px/1.65 \\'Segoe UI\\',\\'Microsoft YaHei\\',sans-serif; box-shadow:0 22px 60px rgba(0,0,0,.55); overflow:hidden;">'
       + '<div style="padding:16px 20px 10px; border-bottom:1px solid rgba(255,255,255,.08);">'
-      + '<div style="font-size:15px; font-weight:600;">' + (data.fresh ? '欢迎使用 DSH Desktop' : 'DSH Desktop 已更新') + ' <span style="color:#8fb3ff;">v' + esc(data.entries[0].version) + '</span></div>'
-      + '<div style="color:#9fb4d8; font-size:12px; margin-top:2px;">' + (data.fresh ? '安装完成，本次发布内容如下：' : '更新完成，本次发布内容如下：') + '</div>'
+      + '<div style="font-size:15px; font-weight:600;">' + (data.kind === 'fresh' ? '欢迎使用 DSH Desktop' : data.kind === 'update' ? 'DSH Desktop 已更新' : '今日更新说明') + ' <span style="color:#8fb3ff;">v' + esc(data.entries[0].version) + '</span></div>'
+      + '<div style="color:#9fb4d8; font-size:12px; margin-top:2px;">' + (data.kind === 'fresh' ? '安装完成，本次发布内容如下：' : data.kind === 'update' ? '更新完成，本次发布内容如下：' : '每天首次打开会展示一次当前版本说明：') + '</div>'
       + '</div>'
       + '<div style="overflow-y:auto; padding:12px 20px 14px; flex:1;">' + sections + '</div>'
       + '<div style="padding:10px 20px; border-top:1px solid rgba(255,255,255,.08); display:flex; justify-content:flex-end;">'
@@ -1088,7 +1259,7 @@ async function injectWindowChrome() {
     bar.innerHTML = '<img class="dsh-window-icon" src="${iconUrl}"/><span class="dsh-window-title">DSH Desktop</span><div class="dsh-window-actions"><button class="dsh-title-button dsh-tools" data-action="tools" aria-label="工具区" title="工具区"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4.5 4.5 0 0 0-6.1 5.4L3 17.3V21h3.7l5.6-5.6a4.5 4.5 0 0 0 5.4-6.1l-3.2 3.2-2.8-.7-.7-2.8 3.7-3.7z"/></svg></button><button class="dsh-title-button dsh-minimize" data-action="minimize" aria-label="Minimize"></button><button class="dsh-title-button dsh-maximize" data-action="maximize" aria-label="Maximize"></button><button class="dsh-title-button dsh-close" data-action="close" aria-label="Close"></button></div>';
     const style = document.createElement('style');
     style.textContent = \`
-      #dsh-window-chrome { position: fixed; inset: 0 0 auto 0; height: 42px; z-index: 2147483647; display:flex; align-items:center; gap:10px; padding:0 10px 0 14px; color:#eef3ff; background:#171d2a; border-bottom:1px solid rgba(255,255,255,.08); font:600 13px "Segoe UI", "Microsoft YaHei", sans-serif; -webkit-app-region:drag; user-select:none; }
+      #dsh-window-chrome { position: fixed; inset: 0 0 auto 0; height: 42px; z-index: 2147483600; display:flex; align-items:center; gap:10px; padding:0 10px 0 14px; color:#eef3ff; background:#171d2a; border-bottom:1px solid rgba(255,255,255,.08); font:600 13px "Segoe UI", "Microsoft YaHei", sans-serif; -webkit-app-region:drag; user-select:none; }
       #dsh-window-chrome .dsh-window-icon { width:25px; height:25px; object-fit:contain; }
       #dsh-window-chrome .dsh-window-title { letter-spacing:.02em; }
       #dsh-window-chrome .dsh-window-actions { margin-left:auto; display:flex; height:100%; -webkit-app-region:no-drag; }
@@ -1112,8 +1283,11 @@ async function injectWindowChrome() {
       html.dsh-light #dsh-window-chrome button[data-action="close"]:hover { color:white; background:#d94b5b; }
       html { height:100% !important; overflow:hidden !important; overscroll-behavior:none; }
       body { height:100% !important; max-height:100% !important; box-sizing:border-box !important; overflow:hidden !important; padding-top:42px !important; }
+      [class*="toggleCluster"] { top: 7px !important; right: 214px !important; z-index: 2147483647 !important; }
+      #dsh-window-chrome .dsh-desk-toggle, #dsh-desk-side, #dsh-desk-term { display: none !important; }
     \`;
     document.head.appendChild(style); document.body.appendChild(bar);
+    document.documentElement.setAttribute('data-dsh-title-bar-height', '42');
     const updateTheme = () => { const scheme = getComputedStyle(document.documentElement).colorScheme; const dark = document.body.hasAttribute('data-ds-dark-theme') || scheme.includes('dark'); document.documentElement.classList.toggle('dsh-light', !dark); };
     updateTheme(); new MutationObserver(updateTheme).observe(document.documentElement, {attributes:true, attributeFilter:['class','data-theme','style']}); new MutationObserver(updateTheme).observe(document.body, {attributes:true, attributeFilter:['class','data-theme','data-ds-dark-theme','style']});
     bar.querySelectorAll('button').forEach(button => button.addEventListener('click', () => window.dshDesktop.windowAction(button.dataset.action)));
@@ -1201,6 +1375,21 @@ async function launchHarness() {
           // from expanding and regaining its taskbar presence.
           startupLog('window chrome inject failed: ' + String(error))
         }
+        try {
+          await injectComposerAttach(mainWindow.webContents)
+        } catch (error) {
+          startupLog('composer attach inject failed: ' + String(error))
+        }
+        try {
+          await injectCommandZh(mainWindow.webContents)
+        } catch (error) {
+          startupLog('command zh inject failed: ' + String(error))
+        }
+        try {
+          await injectTurnChrome(mainWindow.webContents)
+        } catch (error) {
+          startupLog('turn chrome inject failed: ' + String(error))
+        }
         await maybeShowChangelog()
         expandMainWindow()
         resolve()
@@ -1257,9 +1446,21 @@ async function boot() {
     await loadVisionConfig()
     await applyVisionConfigToHarness()
     await ensureHarnessReady()
+    try {
+      const packedPlugins = path.join(import.meta.dirname, 'plugins')
+      const unpackedPlugins = path.join(process.resourcesPath, 'app.asar.unpacked', 'electron', 'plugins')
+      syncCompanionPlugins({
+        pluginsRoot: existsSync(unpackedPlugins) ? unpackedPlugins : packedPlugins,
+        dshHome: dshHomeDir,
+        harnessRoot,
+        log: (line) => startupLog('companion: ' + line),
+      })
+    } catch (error) {
+      startupLog('companion sync failed: ' + String(error))
+    }
     // Stage the post-install/post-update changelog dialog before the harness
     // page exists; finishStartup shows it once the page is loaded.
-    pendingChangelog = changelogForTransition(readSeenVersion())
+    pendingChangelog = changelogForLaunch()
     await launchHarness()
     // Restore the remote-control switches the user left on: the forwarder
     // targets harnessUrl, which launchHarness has just resolved.
@@ -1417,6 +1618,11 @@ async function runInstallerWorker() {
   app.exit(0)
 }
 
+async function hashFile(filePath) {
+  const data = await originalFs.promises.readFile(filePath)
+  return createHash('sha256').update(data).digest('hex')
+}
+
 async function copyTreeWithProgress(sourceDir, targetDir, write) {
   const files = []
   async function walk(dir, prefix) {
@@ -1439,6 +1645,21 @@ async function copyTreeWithProgress(sourceDir, targetDir, write) {
   for (const file of files) {
     const dest = path.join(targetDir, file.rel)
     await originalFs.promises.mkdir(path.dirname(dest), { recursive: true })
+    // Skip files that already match: an overlay update must not rewrite the
+    // unchanged Electron shell / runtime tree on every launch.
+    try {
+      const current = await originalFs.promises.stat(dest)
+      if (current.size === file.size) {
+        const [srcHash, dstHash] = await Promise.all([hashFile(file.full), hashFile(dest)])
+        if (srcHash === dstHash) {
+          copied += file.size
+          count += 1
+          continue
+        }
+      }
+    } catch {
+      /* dest missing or unreadable — fall through to copy */
+    }
     // During an update the previous app instance may still be shutting down
     // and holding its files; retry locked files for a bounded window.
     for (let attempt = 1; ; attempt += 1) {
@@ -1500,6 +1721,19 @@ async function extractRuntimePayload(exePath, targetDir, write) {
       await originalFs.promises.mkdir(path.dirname(dest), { recursive: true })
       const size = Number(file.size) || 0
       const offset = Number(file.offset) || 0
+      const want = typeof file.sha256 === 'string' ? file.sha256 : ''
+      if (want !== '' && existsSync(dest)) {
+        try {
+          const current = await originalFs.promises.stat(dest)
+          if (current.size === size && await hashFile(dest) === want) {
+            done += size
+            count += 1
+            continue
+          }
+        } catch {
+          /* dest unreadable — rewrite */
+        }
+      }
       const buf = Buffer.alloc(size)
       await handle.read(buf, 0, size, offset)
       await originalFs.promises.writeFile(dest, buf)
@@ -1522,11 +1756,15 @@ async function createShortcuts(targetDir, write) {
   const exe = path.join(targetDir, 'DSH Desktop.exe')
   const desktopLink = 'C:\\Users\\Public\\Desktop\\DSH Desktop.lnk'
   const menuLink = 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\DSH Desktop.lnk'
+  const uninstallLink = 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\卸载 DSH Desktop.lnk'
   const ps = `$ws = New-Object -ComObject WScript.Shell;`
     + ` foreach ($p in @('${desktopLink}', '${menuLink}')) {`
     + ` $s = $ws.CreateShortcut($p); $s.TargetPath = '${exe}';`
     + ` $s.IconLocation = '${exe},0'; $s.WorkingDirectory = '${targetDir}';`
-    + ` $s.Description = 'DeepSeek Harness Desktop'; $s.Save() }`
+    + ` $s.Description = 'DeepSeek Harness Desktop'; $s.Save() };`
+    + ` $u = $ws.CreateShortcut('${uninstallLink}'); $u.TargetPath = '${exe}';`
+    + ` $u.Arguments = '--uninstall'; $u.IconLocation = '${exe},0';`
+    + ` $u.Description = '卸载 DSH Desktop'; $u.Save()`
   await runPowershell(ps)
   // Explorer caches shortcut icons by target path; refresh the cache so the
   // freshly installed executable's icon replaces any stale cached one.
@@ -1695,25 +1933,64 @@ async function openInstallerWindow() {
 
 // ==================== uninstall ====================
 
-async function confirmAndUninstall() {
-  const result = await dialog.showMessageBox({
+function writeUninstallScript(targetDir) {
+  const script = path.join(tmpdir(), 'dsh-desktop-uninstall.ps1')
+  const escaped = targetDir.replace(/'/g, "''")
+  const body = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    `$target = '${escaped}'`,
+    'Start-Sleep -Seconds 2',
+    `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLower().StartsWith($target.TrimEnd('\\').ToLower() + '\\') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`,
+    'Start-Sleep -Seconds 1',
+    `try { Remove-MpPreference -ExclusionPath $target -ErrorAction SilentlyContinue } catch {}`,
+    'Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue',
+    `Remove-Item -LiteralPath 'C:\\Users\\Public\\Desktop\\DSH Desktop.lnk' -Force`,
+    `Remove-Item -LiteralPath 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\DSH Desktop.lnk' -Force`,
+    `Remove-Item -LiteralPath 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\卸载 DSH Desktop.lnk' -Force`,
+    `Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'Desktop\\DSH Desktop.lnk') -Force`,
+    `Remove-Item -LiteralPath (Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs\\DSH Desktop.lnk') -Force`,
+    `Remove-Item -LiteralPath 'C:\\dsh-desktop.ini' -Force`,
+    `reg delete 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${APP_GUID}' /f`,
+    "Add-Type -AssemblyName PresentationFramework",
+    "[System.Windows.MessageBox]::Show('DSH Desktop 已卸载。','DSH Desktop')",
+    '',
+  ].join('\r\n')
+  writeFileSync(script, body, 'utf8')
+  return script
+}
+
+async function requestUninstall() {
+  const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+  const prompt = {
     type: 'question',
-    buttons: ['卸载', '取消'],
+    buttons: ['立即卸载', '取消'],
     defaultId: 1,
     cancelId: 1,
-    title: 'DSH Desktop 卸载',
+    title: '卸载 DSH Desktop',
     message: '确定要卸载 DSH Desktop 吗？',
-    detail: '将删除应用文件与快捷方式。',
-  })
-  if (result.response !== 0) {
-    app.quit()
-    return
+    detail: '将删除安装目录、开始菜单/桌面快捷方式和注册表项。用户数据（对话、设置）默认保留。',
   }
-  const exe = process.execPath
-  const ps = `Start-Process -FilePath '${exe.replace(/'/g, "''")}' -ArgumentList '--uninstall-worker' -Verb RunAs`
-  spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore', windowsHide: true }).unref()
-  app.quit()
+  const result = parent
+    ? await dialog.showMessageBox(parent, prompt)
+    : await dialog.showMessageBox(prompt)
+  if (result.response !== 0) return { ok: false, cancelled: true }
+  const targetDir = app.isPackaged ? path.dirname(process.execPath) : desktopRoot
+  const script = writeUninstallScript(targetDir)
+  const quoted = script.replace(/'/g, "''")
+  spawn('powershell.exe', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    `Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File "${quoted}"' -Verb RunAs`,
+  ], { stdio: 'ignore', windowsHide: true }).unref()
+  setTimeout(() => quitApp(), 400)
+  return { ok: true }
 }
+
+async function confirmAndUninstall() {
+  const result = await requestUninstall()
+  if (result.cancelled) app.quit()
+}
+
+ipcMain.handle('app:uninstall', () => requestUninstall())
 
 async function runUninstallWorker() {
   const targetDir = path.dirname(process.execPath)
@@ -1740,6 +2017,13 @@ async function runUninstallWorker() {
 }
 
 app.whenReady().then(() => {
+  if (isSecondaryInstance) {
+    app.quit()
+    return
+  }
+  if (isAppInstance) {
+    app.on('second-instance', () => restoreMainWindow())
+  }
   if (isInstallerWorker) {
     void runInstallerWorker().catch((error) => {
       startupLog('installer worker crashed: ' + String(error))
@@ -1760,6 +2044,26 @@ app.whenReady().then(() => {
   }
   // Self-updater: checks the official repository baseline from the tools
   // window (检查更新) and applies updates through the installer worker.
+  registerFileRevertIpc(async () => {
+    try {
+      const value = await callHarnessRpc('workspace.list', {})
+      return (value.items ?? []).map((item) => item.path).filter(Boolean)
+    } catch {
+      return []
+    }
+  })
+  registerWorkspaceIpc({
+    checkpointRoot: () => path.join(app.getPath('userData'), 'workspace-checkpoints'),
+    getWorkspaces: async () => {
+      const value = await callHarnessRpc('workspace.list', {})
+      return { items: value.items ?? [] }
+    },
+    sendToMain: (channel, payload) => {
+      if (mainWindow !== null && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(channel, payload)
+      }
+    },
+  })
   registerUpdateIpc({
     version: APP_VERSION,
     installed: () => app.isPackaged,
@@ -1787,14 +2091,20 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  if (tray !== null && !allowQuit) return
   if (process.platform !== 'darwin') {
-    app.quit()
+    quitApp()
   }
 })
 
 app.on('before-quit', (event) => {
   if (stopping) return
   stopping = true
+  allowQuit = true
+  if (tray !== null) {
+    tray.destroy()
+    tray = null
+  }
   event.preventDefault()
   remoteControl?.dispose()
   void stopHarnessProcess().finally(() => {

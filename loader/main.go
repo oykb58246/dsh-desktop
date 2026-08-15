@@ -10,8 +10,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -87,6 +89,7 @@ type fileEntry struct {
 	Path   string `json:"path"`
 	Offset int64  `json:"offset"`
 	Size   int64  `json:"size"`
+	Sha256 string `json:"sha256,omitempty"`
 }
 
 type shellManifest struct {
@@ -817,23 +820,47 @@ func readManifests(exe string) (shellFiles, runtimeFiles []fileEntry, shellTotal
 	return sm.Files, rt.Files, shellTotal, runtimeTotal, nil
 }
 
+// fileSHA256 returns the hex sha256 of dest, used to skip unchanged overlay files.
+func fileSHA256(dest string) (string, error) {
+	in, err := os.Open(dest)
+	if err != nil {
+		return "", err
+	}
+	defer in.Close()
+	sum := sha256.New()
+	if _, err := io.Copy(sum, in); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
+}
+
 // extractFile copies one payload file from the installer exe to dest. When a
 // running (or just-quit) app still holds the target (an update overlays the
 // live install), locked files are retried for a bounded window before failing.
-func extractFile(f *os.File, offset, size int64, dest string, buf []byte) error {
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return err
+// If dest already exists and its sha256 matches the manifest, the write is
+// skipped so an update only touches changed files.
+func extractFile(f *os.File, offset, size int64, dest, wantHex string, buf []byte) (skipped bool, err error) {
+	if wantHex != "" {
+		if st, statErr := os.Stat(dest); statErr == nil && st.Size() == size {
+			if got, hashErr := fileSHA256(dest); hashErr == nil && strings.EqualFold(got, wantHex) {
+				return true, nil
+			}
+		}
+	}
+	if mkErr := os.MkdirAll(filepath.Dir(dest), 0o755); mkErr != nil {
+		return false, mkErr
 	}
 	var out *os.File
-	var err error
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		out, err = os.Create(dest)
-		if err == nil {
+		var createErr error
+		out, createErr = os.Create(dest)
+		if createErr == nil {
 			break
 		}
+		err = createErr
 		if !isBusyError(err) || time.Now().After(deadline) {
-			return err
+			return false, err
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
@@ -847,18 +874,18 @@ func extractFile(f *os.File, offset, size int64, dest string, buf []byte) error 
 		}
 		rn, err := f.ReadAt(buf[:n], pos)
 		if err != nil && err != io.EOF {
-			return err
+			return false, err
 		}
 		if rn == 0 {
 			break
 		}
 		if _, err := out.Write(buf[:rn]); err != nil {
-			return err
+			return false, err
 		}
 		pos += int64(rn)
 		remaining -= int64(rn)
 	}
-	return nil
+	return false, nil
 }
 
 // isBusyError reports whether err is a transient file-lock failure worth
@@ -903,6 +930,7 @@ func installTo(target string) error {
 	defer f.Close()
 	total := int64(len(shellFiles) + len(runtimeFiles))
 	var done int64
+	var skipped int64
 	buf := make([]byte, 1<<20)
 	report := func(name string) {
 		done++
@@ -917,24 +945,38 @@ func installTo(target string) error {
 	go warmWorker(warmDone)
 	for _, fe := range shellFiles {
 		dest := filepath.Join(target, filepath.FromSlash(fe.Path))
-		if err := extractFile(f, fe.Offset, fe.Size, dest, buf); err != nil {
+		skip, err := extractFile(f, fe.Offset, fe.Size, dest, fe.Sha256, buf)
+		if err != nil {
 			return err
 		}
-		warmQueue <- dest
+		if skip {
+			skipped++
+		} else {
+			warmQueue <- dest
+		}
 		report(fe.Path)
 	}
 	for _, fe := range runtimeFiles {
 		dest := filepath.Join(target, "resources", "dsh-runtime", filepath.FromSlash(fe.Path))
-		if err := extractFile(f, fe.Offset, fe.Size, dest, buf); err != nil {
+		skip, err := extractFile(f, fe.Offset, fe.Size, dest, fe.Sha256, buf)
+		if err != nil {
 			return err
 		}
-		warmQueue <- dest
+		if skip {
+			skipped++
+		} else {
+			warmQueue <- dest
+		}
 		report(fe.Path)
 	}
 	// Files are copied (99%): finish initializing off-screen — drain the
 	// warm-up read-back (OS cache + antivirus scan of the fresh tree), then
 	// the registry/shortcuts/Defender steps — before declaring completion.
-	statusText = "正在初始化应用…"
+	if skipped > 0 {
+		statusText = fmt.Sprintf("正在初始化应用…（已跳过 %d 个未改动文件）", skipped)
+	} else {
+		statusText = "正在初始化应用…"
+	}
 	paintAll()
 	close(warmQueue)
 	<-warmDone
@@ -1163,7 +1205,9 @@ func createShortcuts(target string) error {
 	exe := filepath.Join(target, "DSH Desktop.exe")
 	ps := "$ws = New-Object -ComObject WScript.Shell;"
 	ps += " foreach ($p in @('" + os.Getenv("USERPROFILE") + "\\Desktop\\DSH Desktop.lnk', '" + os.Getenv("APPDATA") + "\\Microsoft\\Windows\\Start Menu\\Programs\\DSH Desktop.lnk')) {"
-	ps += " $s = $ws.CreateShortcut($p); $s.TargetPath = '" + exe + "'; $s.IconLocation = '" + exe + ",0'; $s.Save() }"
+	ps += " $s = $ws.CreateShortcut($p); $s.TargetPath = '" + exe + "'; $s.IconLocation = '" + exe + ",0'; $s.Save() };"
+	ps += " $u = $ws.CreateShortcut('" + os.Getenv("APPDATA") + "\\Microsoft\\Windows\\Start Menu\\Programs\\卸载 DSH Desktop.lnk');"
+	ps += " $u.TargetPath = '" + exe + "'; $u.Arguments = '--uninstall'; $u.IconLocation = '" + exe + ",0'; $u.Save()"
 	return hideConsole(exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)).Run()
 }
 

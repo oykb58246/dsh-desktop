@@ -491,7 +491,14 @@ function renderUpdateInfo(info) {
   if (latest === null && info.checkedAt === null && (info.error ?? null) === null) {
     $('update-latest-version').textContent = '—'
     $('update-latest-meta').textContent = '尚未检查'
-    setUpdateStatus('checking', '打开面板后会自动检查，也可以点击「检查更新」。')
+    setUpdateStatus('checking', '窗口打开后会自动检查，也可以点击「检查更新」。')
+  } else if (latest === null && updateState.checking) {
+    // A baseline check is in flight: the snapshot's checkedAt is already
+    // stamped but latest is not filled yet — say so instead of misreading the
+    // missing baseline as "not published".
+    $('update-latest-version').textContent = '—'
+    $('update-latest-meta').textContent = '正在检查'
+    setUpdateStatus('checking', '正在检查官方基线…')
   } else if (info.error && latest === null) {
     $('update-latest-version').textContent = '—'
     $('update-latest-meta').textContent = '检查失败'
@@ -862,6 +869,15 @@ function wire() {
       )
     }
   })
+  // The update rail badge must be visible as soon as the tools window opens,
+  // not only after the update panel is opened: fetch the shared baseline
+  // snapshot (the boot background check may already have filled it) and, when
+  // no check has run this session yet, trigger one so the dot appears as soon
+  // as the network verdict lands (renderUpdateInfo toggles `.has-update`).
+  void api.updateInfo().then((info) => {
+    renderUpdateInfo(info)
+    if (!updateState.checked) return runUpdateCheck()
+  }).catch(() => {})
   void refreshAll()
   switchTool('codex-import')
 }

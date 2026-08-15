@@ -1192,7 +1192,10 @@ func startInstall() {
 			"点击「是」将立即终止这 %d 个进程并继续安装，未保存的会话数据可能丢失。\n"+
 			"点击「否」将取消本次安装，请先手动关闭 DSH Desktop 后再试。",
 			len(pids), installDir, len(pids))
-		r, _, _ := procMessageBoxW.Call(hwnd, uintptr(unsafe.Pointer(utf16Ptr("DSH Desktop 安装"))), uintptr(unsafe.Pointer(utf16Ptr(msg))), mbYesNo|mbIconWarning|mbDefButton2)
+		// MessageBoxW(hWnd, lpText, lpCaption, uType): the message belongs in
+		// the body (lpText), the short window title in lpCaption — these were
+		// swapped once and the body only ever showed the caption.
+		r, _, _ := procMessageBoxW.Call(hwnd, uintptr(unsafe.Pointer(utf16Ptr(msg))), uintptr(unsafe.Pointer(utf16Ptr("DSH Desktop 安装"))), mbYesNo|mbIconWarning|mbDefButton2)
 		if r != idYes {
 			installing = false
 			return

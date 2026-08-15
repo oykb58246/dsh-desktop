@@ -77,6 +77,9 @@ pnpm dist:win
   容量提示「本次安装约需 X · 目标盘剩余 Y」（`GetDiskFreeSpaceExW`）、安装按钮（590,386,130,44）。
 - **单实例**：`CreateMutexW`（`Local\` 会话级）防重复打开；第二个实例激活已有窗口后退出。
   提权交接（`--dir`）实例会短暂重试互斥量，原实例在 `relaunchElevated` 前 `releaseSingleInstance`。
+- **自更新 worker**（`--installer-worker <目录> [--relaunch]`，由更新器以提权拉起）：**不是
+  静默更新**——复用同一进度页（标题「正在更新」），完成后若带 `--relaunch` 经 explorer 以
+  普通令牌启动新版并自动关窗；失败显示错误页并写 `C:\dsh-desktop-install.log`。
 - **安装前进程检测**：点「安装」后（提权副本内）用 PowerShell CIM 枚举目标目录下运行的
   DSH Desktop 进程，有则 `MessageBoxW`（是/否，默认否）询问是否结束；「是」则
   `taskkill /F /T` 并轮询至多 5s 等文件释放。「否」则中止安装。

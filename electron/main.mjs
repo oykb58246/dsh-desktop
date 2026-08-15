@@ -201,7 +201,7 @@ async function mergeYamlLine(filePath, key, value) {
  * Push the current vision configuration into the Harness home: the
  * cordis.patch.yml row and the DashScope key. The key goes into
  * `$DSH_HOME/.credentials.yaml`, which the local credential provider watches
- * live — so a changed key takes effect on the next turn without a restart;
+ * live â€” so a changed key takes effect on the next turn without a restart;
  * `$DSH_HOME/.env` keeps the same value as a boot-time fallback.
  */
 async function applyVisionConfigToHarness() {
@@ -246,7 +246,7 @@ ipcMain.handle('vision:test', async (_event, next) => {
   const key = (typeof next?.apiKey === 'string' ? next.apiKey : visionConfig.apiKey).trim()
   const baseURL = (typeof next?.baseURL === 'string' && next.baseURL.trim() !== '' ? next.baseURL.trim() : visionConfig.baseURL)
   const model = (typeof next?.model === 'string' && next.model.trim() !== '' ? next.model.trim() : visionConfig.model)
-  if (key === '') return { ok: false, message: '尚未填写 API Key' }
+  if (key === '') return { ok: false, message: 'å°šæœªå¡«å†™ API Key' }
   const url = `${baseURL.replace(/\/+$/u, '')}/chat/completions`
   try {
     const response = await fetch(url, {
@@ -271,7 +271,7 @@ ipcMain.handle('vision:test', async (_event, next) => {
       }
       return { ok: false, status: response.status, message }
     }
-    return { ok: true, status: response.status, message: '连接成功：密钥与 API 地址有效' }
+    return { ok: true, status: response.status, message: 'è¿žæŽ¥æˆåŠŸï¼šå¯†é’¥ä¸Ž API åœ°å€æœ‰æ•ˆ' }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) }
   }
@@ -379,11 +379,11 @@ function installContextMenu(window) {
   window.webContents.on('context-menu', (_event, params) => {
     const hasSelection = params.selectionText.trim().length > 0
     const menu = Menu.buildFromTemplate([
-      { role: 'copy', label: '复制', enabled: hasSelection || params.isEditable },
-      { role: 'paste', label: '粘贴', enabled: params.isEditable },
-      { role: 'cut', label: '剪切', enabled: params.isEditable },
+      { role: 'copy', label: 'å¤åˆ¶', enabled: hasSelection || params.isEditable },
+      { role: 'paste', label: 'ç²˜è´´', enabled: params.isEditable },
+      { role: 'cut', label: 'å‰ªåˆ‡', enabled: params.isEditable },
       { type: 'separator' },
-      { role: 'selectAll', label: '全选' },
+      { role: 'selectAll', label: 'å…¨é€‰' },
     ])
     menu.popup({ window })
   })
@@ -505,7 +505,7 @@ ipcMain.handle('open-external', async (_event, url) => {
 
 /** Call one api-proxy domain method on the running harness, returning its value. */
 async function callHarnessRpc(method, payload) {
-  if (harnessUrl === null) throw new Error('DSH 服务尚未就绪')
+  if (harnessUrl === null) throw new Error('DSH æœåŠ¡å°šæœªå°±ç»ª')
   const response = await fetch(`${harnessUrl}/api/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -518,13 +518,13 @@ async function callHarnessRpc(method, payload) {
   })
   const json = await response.json()
   if (json?.result?.ok !== true) {
-    throw new Error(json?.result?.error?.message ?? `RPC ${method} 失败`)
+    throw new Error(json?.result?.error?.message ?? `RPC ${method} å¤±è´¥`)
   }
   return json.result.value
 }
 
 ipcMain.handle('archive:list', async () => {
-  // listArchived → { workspaces, archivedSessionIds }
+  // listArchived â†’ { workspaces, archivedSessionIds }
   const value = await callHarnessRpc('workspace.listArchived', {})
   return {
     workspaces: value.workspaces ?? [],
@@ -561,7 +561,7 @@ function openToolsWindow() {
     frame: false,
     show: false,
     icon: appIconPath,
-    title: 'DSH Desktop 工具区',
+    title: 'DSH Desktop å·¥å…·åŒº',
     webPreferences: {
       preload: path.join(import.meta.dirname, 'preload.mjs'),
       contextIsolation: true,
@@ -595,7 +595,7 @@ async function pickToolsDirectory(title) {
   if (owner === null || owner.isDestroyed()) return null
   const result = await dialog.showOpenDialog(owner, {
     title,
-    buttonLabel: '选择此目录',
+    buttonLabel: 'é€‰æ‹©æ­¤ç›®å½•',
     properties: ['openDirectory', 'createDirectory'],
   })
   if (toolsWindow !== null && !toolsWindow.isDestroyed()) {
@@ -607,7 +607,7 @@ async function pickToolsDirectory(title) {
 }
 
 ipcMain.handle('codex-project-choose-source', async () => {
-  const picked = await pickToolsDirectory('选择 Codex 工作区')
+  const picked = await pickToolsDirectory('é€‰æ‹© Codex å·¥ä½œåŒº')
   if (picked === null) return null
   return await scanCodexProjects(picked)
 })
@@ -656,7 +656,7 @@ ipcMain.handle('codex-import-scan-all', async () => {
  * Collect the sessions already present under DSH_HOME/sessions: id (decoded
  * from the directory name) plus the log header's cwd, which drives workspace
  * re-grouping.
- * @returns a Map of raw session id → stored cwd.
+ * @returns a Map of raw session id â†’ stored cwd.
  */
 async function listImportedSessions() {
   const imported = new Map()
@@ -689,13 +689,13 @@ async function listImportedSessions() {
 
 /**
  * Re-attach imported sessions that exist on disk but are not listed in any
- * workspace (the sidebar shows them as 未分组). A workspace whose path equals
- * the session's stored cwd — or contains it — receives the session; when no
+ * workspace (the sidebar shows them as æœªåˆ†ç»„). A workspace whose path equals
+ * the session's stored cwd â€” or contains it â€” receives the session; when no
  * such workspace exists one is recreated from the session cwd so previously
  * imported sessions never stay orphaned. No-op while the harness web service
  * is unavailable.
- * @param imported - Map of session id → stored cwd.
- * @param titleById - Map of session id → Codex thread name (pinned as title).
+ * @param imported - Map of session id â†’ stored cwd.
+ * @param titleById - Map of session id â†’ Codex thread name (pinned as title).
  */
 async function repairUngroupedSessions(imported, titleById) {
   if (harnessUrl === null || imported.size === 0) return
@@ -752,7 +752,7 @@ async function repairUngroupedSessions(imported, titleById) {
 
 /** Pick a custom Codex sessions directory and persist it. */
 ipcMain.handle('codex-sessions-choose', async () => {
-  const picked = await pickToolsDirectory('选择 Codex 会话目录')
+  const picked = await pickToolsDirectory('é€‰æ‹© Codex ä¼šè¯ç›®å½•')
   if (picked === null) return null
   codexSessionsCustomRoot = picked
   await saveCodexImportConfig()
@@ -814,7 +814,7 @@ ipcMain.handle('codex-import-run', async (_event, { selection }) => {
         const createJson = await createResponse.json()
         const createResult = createJson?.result
         if (createResult?.ok !== true) {
-          workspace = { ok: false, error: createResult?.error?.message ?? `注册失败 (HTTP ${createResponse.status})` }
+          workspace = { ok: false, error: createResult?.error?.message ?? `æ³¨å†Œå¤±è´¥ (HTTP ${createResponse.status})` }
         } else {
           const workspaceId = createResult.value?.workspace?.workspaceId
           // Attach each freshly written session to the workspace via
@@ -888,7 +888,7 @@ async function injectWindowChrome() {
     if (document.getElementById('dsh-window-chrome')) return;
     const bar = document.createElement('div');
     bar.id = 'dsh-window-chrome';
-    bar.innerHTML = '<img class="dsh-window-icon" src="${iconUrl}"/><span class="dsh-window-title">DSH Desktop</span><div class="dsh-window-actions"><button class="dsh-title-button dsh-tools" data-action="tools" aria-label="工具区" title="工具区"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4.5 4.5 0 0 0-6.1 5.4L3 17.3V21h3.7l5.6-5.6a4.5 4.5 0 0 0 5.4-6.1l-3.2 3.2-2.8-.7-.7-2.8 3.7-3.7z"/></svg></button><button class="dsh-title-button dsh-minimize" data-action="minimize" aria-label="Minimize"></button><button class="dsh-title-button dsh-maximize" data-action="maximize" aria-label="Maximize"></button><button class="dsh-title-button dsh-close" data-action="close" aria-label="Close"></button></div>';
+    bar.innerHTML = '<img class="dsh-window-icon" src="${iconUrl}"/><span class="dsh-window-title">DSH Desktop</span><div class="dsh-window-actions"><button class="dsh-title-button dsh-tools" data-action="tools" aria-label="å·¥å…·åŒº" title="å·¥å…·åŒº"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4.5 4.5 0 0 0-6.1 5.4L3 17.3V21h3.7l5.6-5.6a4.5 4.5 0 0 0 5.4-6.1l-3.2 3.2-2.8-.7-.7-2.8 3.7-3.7z"/></svg></button><button class="dsh-title-button dsh-minimize" data-action="minimize" aria-label="Minimize"></button><button class="dsh-title-button dsh-maximize" data-action="maximize" aria-label="Maximize"></button><button class="dsh-title-button dsh-close" data-action="close" aria-label="Close"></button></div>';
     const style = document.createElement('style');
     style.textContent = \`
       #dsh-window-chrome { position: fixed; inset: 0 0 auto 0; height: 42px; z-index: 2147483647; display:flex; align-items:center; gap:10px; padding:0 10px 0 14px; color:#eef3ff; background:#171d2a; border-bottom:1px solid rgba(255,255,255,.08); font:600 13px "Segoe UI", "Microsoft YaHei", sans-serif; -webkit-app-region:drag; user-select:none; }
@@ -1171,7 +1171,7 @@ async function runInstallerWorker() {
     await copyTreeWithProgress(sourceDir, targetDir, write)
     // The bundled runtime lives inside the installer exe itself (appended by
     // scripts/append-payload.mjs); the native loader hands its own path over
-    // via DSH_SETUP_EXE. Extract it straight to the target — one copy only.
+    // via DSH_SETUP_EXE. Extract it straight to the target â€” one copy only.
     const payloadExe = process.env.DSH_SETUP_EXE
     if (payloadExe !== undefined && payloadExe !== '' && existsSync(payloadExe)) {
       write('phase', 'extracting bundled runtime')
@@ -1261,7 +1261,7 @@ async function copyTreeWithProgress(sourceDir, targetDir, write) {
  * Read the runtime payload section appended to the installer exe
  * (`[runtime files][manifest][u32 len][DSHPLD01]`) and write every file under
  * `<target>/resources/dsh-runtime`. This is the single copy that installs the
- * bundled data — it comes straight out of the installer executable.
+ * bundled data â€” it comes straight out of the installer executable.
  * @param exePath - the installer exe (the native loader) carrying the payload.
  * @param targetDir - the installation directory.
  * @param write - the log sink `(kind, text)`.
@@ -1364,7 +1364,7 @@ async function openInstallerWindow() {
     show: false,
     skipTaskbar: false,
     icon: appIconPath,
-    title: 'DSH Desktop 安装',
+    title: 'DSH Desktop å®‰è£…',
     webPreferences: {
       preload: path.join(import.meta.dirname, 'preload.mjs'),
       contextIsolation: true,
@@ -1398,7 +1398,7 @@ async function openInstallerWindow() {
   ipcMain.handle('installer:choose-dir', async () => {
     if (installerWindow === null) return null
     const result = await dialog.showOpenDialog(installerWindow, {
-      title: '选择安装目录',
+      title: 'é€‰æ‹©å®‰è£…ç›®å½•',
       properties: ['openDirectory', 'createDirectory'],
     })
     if (result.canceled || result.filePaths.length === 0) return null
@@ -1412,18 +1412,18 @@ async function openInstallerWindow() {
     // Let the user decide whether to stop an already-running install/update
     // target: the worker copies INTO `target`, and a running app from that
     // directory locks its files. Only processes whose executable lives under
-    // the target are considered — the installer's own window (a temp-extracted
+    // the target are considered â€” the installer's own window (a temp-extracted
     // copy) never matches, so it survives the cleanup.
     const runningPids = await runningProcessesUnder(target)
     if (runningPids.length > 0) {
       const choice = await dialog.showMessageBox(installerWindow, {
         type: 'question',
-        buttons: ['结束并继续', '取消'],
+        buttons: ['ç»“æŸå¹¶ç»§ç»­', 'å–æ¶ˆ'],
         defaultId: 0,
         cancelId: 1,
-        title: '检测到正在运行的 DSH Desktop',
-        message: `检测到 ${runningPids.length} 个 DSH Desktop 进程正在运行（安装目录：${target}）。`,
-        detail: '继续安装或更新前需要结束这些进程。是否立即结束它们并继续？',
+        title: 'æ£€æµ‹åˆ°æ­£åœ¨è¿è¡Œçš„ DSH Desktop',
+        message: `æ£€æµ‹åˆ° ${runningPids.length} ä¸ª DSH Desktop è¿›ç¨‹æ­£åœ¨è¿è¡Œï¼ˆå®‰è£…ç›®å½•ï¼š${target}ï¼‰ã€‚`,
+        detail: 'ç»§ç»­å®‰è£…æˆ–æ›´æ–°å‰éœ€è¦ç»“æŸè¿™äº›è¿›ç¨‹ã€‚æ˜¯å¦ç«‹å³ç»“æŸå®ƒä»¬å¹¶ç»§ç»­ï¼Ÿ',
       })
       if (choice.response !== 0) return 'cancelled'
       for (const pid of runningPids) {
@@ -1489,12 +1489,12 @@ async function openInstallerWindow() {
 async function confirmAndUninstall() {
   const result = await dialog.showMessageBox({
     type: 'question',
-    buttons: ['卸载', '取消'],
+    buttons: ['å¸è½½', 'å–æ¶ˆ'],
     defaultId: 1,
     cancelId: 1,
-    title: 'DSH Desktop 卸载',
-    message: '确定要卸载 DSH Desktop 吗？',
-    detail: '将删除应用文件与快捷方式。',
+    title: 'DSH Desktop å¸è½½',
+    message: 'ç¡®å®šè¦å¸è½½ DSH Desktop å—ï¼Ÿ',
+    detail: 'å°†åˆ é™¤åº”ç”¨æ–‡ä»¶ä¸Žå¿«æ·æ–¹å¼ã€‚',
   })
   if (result.response !== 0) {
     app.quit()
@@ -1550,7 +1550,7 @@ app.whenReady().then(() => {
     return
   }
   // Self-updater: checks the official repository baseline from the tools
-  // window (检查更新) and applies updates through the installer worker.
+  // window (æ£€æŸ¥æ›´æ–°) and applies updates through the installer worker.
   registerUpdateIpc({
     version: APP_VERSION,
     installed: () => app.isPackaged,

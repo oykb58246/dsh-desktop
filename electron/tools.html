@@ -40,6 +40,13 @@
             <small>恢复已归档的项目与会话</small>
           </span>
         </button>
+        <button class="tool-rail__item" data-tool="side-card">
+          <span class="tool-rail__icon" aria-hidden="true">▣</span>
+          <span class="tool-rail__copy">
+            <strong>侧边卡片</strong>
+            <small>侧栏内容与默认行为</small>
+          </span>
+        </button>
         <button class="tool-rail__item" data-tool="plugin-market">
           <span class="tool-rail__icon" aria-hidden="true">⌘</span>
           <span class="tool-rail__copy">
@@ -47,25 +54,18 @@
             <small>GitHub dsh-plugin 生态</small>
           </span>
         </button>
-        <button class="tool-rail__item" data-tool="update-check">
-          <span class="tool-rail__icon" aria-hidden="true">⤓</span>
-          <span class="tool-rail__copy">
-            <strong>检查更新</strong>
-            <small>对准官方仓库基线</small>
-          </span>
-        </button>
-        <button class="tool-rail__item" data-tool="uninstall-app">
-          <span class="tool-rail__icon" aria-hidden="true">⌫</span>
-          <span class="tool-rail__copy">
-            <strong>卸载程序</strong>
-            <small>一键移除桌面端</small>
-          </span>
-        </button>
         <button class="tool-rail__item" data-tool="remote-control">
           <span class="tool-rail__icon" aria-hidden="true">⇄</span>
           <span class="tool-rail__copy">
             <strong>Web 远程控制</strong>
             <small>手机浏览器访问本机</small>
+          </span>
+        </button>
+        <button class="tool-rail__item" data-tool="update-check">
+          <span class="tool-rail__icon" aria-hidden="true">⤓</span>
+          <span class="tool-rail__copy">
+            <strong>检查更新</strong>
+            <small>对准官方仓库基线</small>
           </span>
         </button>
       </nav>
@@ -136,6 +136,141 @@
         <div class="done-report" id="done-report" hidden></div>
       </main>
 
+      <main class="tool-stage" id="side-card" hidden>
+        <div class="stage-heading">
+          <div>
+            <p class="eyebrow">SIDE CARD PREFERENCES</p>
+            <h1>侧边卡片</h1>
+          </div>
+          <button class="button button--secondary" id="side-card-refresh" type="button">↻ 刷新</button>
+        </div>
+        <p class="plugin-intro">管理右侧侧边栏的显示内容与默认行为。改动写入当前会话的 Harness 设置，新会话立即生效；已经打开的会话会保留各自布局。</p>
+        <div class="update-status" id="side-card-status" role="status" aria-live="polite"></div>
+
+        <div class="side-card-group">
+          <p class="section-label">常规</p>
+          <label class="vision-switch">
+            <input type="checkbox" data-side-pref="openByDefault" />
+            <span class="vision-switch__copy">
+              <strong>新会话默认打开</strong>
+              <small>新建会话时自动展开侧边卡片；已存在的会话保持各自布局</small>
+            </span>
+          </label>
+          <label class="vision-switch">
+            <input type="checkbox" data-side-pref="interceptOpenPath" />
+            <span class="vision-switch__copy">
+              <strong>聊天区文件在侧边栏打开</strong>
+              <small>点击聊天里的文件链接时，在侧边栏编辑器中打开，不再调用系统默认应用</small>
+            </span>
+          </label>
+          <label class="vision-switch">
+            <input type="checkbox" data-side-pref="titleBarCompat" />
+            <span class="vision-switch__copy">
+              <strong>位置兼容模式</strong>
+              <small>为 Windows 右上角标题栏预留空间，避免侧边栏按钮被挡住</small>
+            </span>
+          </label>
+          <div class="config-item">
+            <span class="config-item__label">默认宽度占比</span>
+            <input class="tools-input tools-input--port" id="side-card-width" type="number" min="20" max="60" step="1" />
+            <span class="side-card-suffix">%</span>
+          </div>
+          <div class="config-item" id="side-card-strip-row">
+            <span class="config-item__label">下移距离</span>
+            <input class="tools-input tools-input--port" id="side-card-strip" type="number" min="0" max="120" step="1" />
+            <span class="side-card-suffix">px</span>
+          </div>
+        </div>
+
+        <div class="side-card-group">
+          <p class="section-label">自动展开</p>
+          <label class="vision-switch">
+            <input type="checkbox" data-side-pref="autoOpenSubagent" />
+            <span class="vision-switch__copy">
+              <strong>检测到子代理时打开任务页</strong>
+              <small>当前会话产生新的子代理时，自动展开侧边栏并打开任务管理页</small>
+            </span>
+          </label>
+          <label class="vision-switch">
+            <input type="checkbox" data-side-pref="autoOpenJobs" />
+            <span class="vision-switch__copy">
+              <strong>有新后台任务时打开任务页</strong>
+              <small>当前会话出现新的后台任务时，自动展开侧边栏并打开后台任务页</small>
+            </span>
+          </label>
+        </div>
+
+        <div class="side-card-group">
+          <p class="section-label">侧边栏内容</p>
+          <div class="side-card-grid" id="side-card-tabs"></div>
+        </div>
+
+        <div class="side-card-group">
+          <p class="section-label">文件预览</p>
+          <div class="side-card-grid" id="side-card-viewers"></div>
+        </div>
+
+        <div class="side-card-group">
+          <p class="section-label">高级</p>
+          <label class="vision-switch">
+            <input type="checkbox" data-side-pref="agentTerminalTools" />
+            <span class="vision-switch__copy">
+              <strong>为模型注入终端工具</strong>
+              <small>开启后，模型可通过 terminal_create 等工具创建并操作侧边栏终端（默认关闭）</small>
+            </span>
+          </label>
+          <label class="vision-switch">
+            <input type="checkbox" data-side-pref="bottomPanelAutoTerminal" />
+            <span class="vision-switch__copy">
+              <strong>底部面板首次展开自动开终端</strong>
+              <small>每次会话中第一次展开底部面板时，尝试自动打开一个新终端</small>
+            </span>
+          </label>
+          <label class="vision-switch">
+            <input type="checkbox" data-side-pref="browserInterceptLinks" />
+            <span class="vision-switch__copy">
+              <strong>聊天区外链在侧边栏打开</strong>
+              <small>点击聊天里的外链时在侧边栏打开；HTTP / HTTPS 可分别控制；Ctrl 点击仍走系统浏览器</small>
+            </span>
+          </label>
+          <label class="vision-switch">
+            <input type="checkbox" data-side-pref="browserInterceptHttp" />
+            <span class="vision-switch__copy">
+              <strong>侧边打开 HTTP 网页</strong>
+              <small>点击 HTTP 外链时在侧边栏打开</small>
+            </span>
+          </label>
+          <label class="vision-switch">
+            <input type="checkbox" data-side-pref="browserInterceptHttps" />
+            <span class="vision-switch__copy">
+              <strong>侧边打开 HTTPS 网页</strong>
+              <small>默认关闭：多数 HTTPS 站点拒绝被嵌入，走系统浏览器更顺畅</small>
+            </span>
+          </label>
+          <label class="vision-switch">
+            <input type="checkbox" data-side-pref="htmlViewerNoSandbox" />
+            <span class="vision-switch__copy">
+              <strong>关闭 HTML 预览沙箱（不安全）</strong>
+              <small>关闭后，预览的 HTML 与界面同源，可读取会话文件。仅对完全可信的文件开启</small>
+            </span>
+          </label>
+          <label class="vision-switch">
+            <input type="checkbox" data-side-pref="htmlViewerDefaultUnsafe" />
+            <span class="vision-switch__copy">
+              <strong>HTML 预览默认以非沙箱模式打开（不安全）</strong>
+              <small>每次打开 HTML 时默认处于非沙箱状态</small>
+            </span>
+          </label>
+          <label class="vision-switch">
+            <input type="checkbox" data-side-pref="browserNoSandbox" />
+            <span class="vision-switch__copy">
+              <strong>关闭浏览器沙箱（不安全）</strong>
+              <small>关闭后，访问的任何网站都与界面同源。仅对完全可信的站点开启</small>
+            </span>
+          </label>
+        </div>
+      </main>
+
       <main class="tool-stage" id="plugin-market" hidden>
         <div class="stage-heading">
           <div>
@@ -146,12 +281,17 @@
             <button class="button button--secondary" id="plugin-refresh" type="button">↻ 刷新</button>
           </div>
         </div>
-        <p class="plugin-intro">桌面端内嵌 GitHub <code>dsh-plugin</code> 主题。安装走官方通道 <code>dsh plugin --profile web add …</code>，写入本机 <code>$DSH_HOME/profiles/web</code>，重启主窗口后生效。</p>
+        <p class="plugin-intro">浏览 GitHub <code>dsh-plugin</code> 主题并安装到本机 web profile。打包后的桌面端会直接从 GitHub 拉仓库安装，不依赖本机 pnpm。安装后请重启主窗口。</p>
         <div class="config-strip">
           <div class="config-item">
             <span class="config-item__label">搜索插件</span>
             <input class="tools-input" id="plugin-search" type="search" spellcheck="false" placeholder="按名称或关键词搜索 dsh-plugin…" />
             <button class="button button--secondary button--mini" id="plugin-search-btn" type="button">搜索</button>
+          </div>
+          <div class="config-item">
+            <span class="config-item__label">直接安装</span>
+            <input class="tools-input" id="plugin-spec" type="text" spellcheck="false" placeholder="github:owner/repo 或 https://github.com/owner/repo" />
+            <button class="button button--primary button--mini" id="plugin-spec-btn" type="button">安装</button>
           </div>
         </div>
         <div class="plugin-section">
@@ -209,29 +349,9 @@
 
         <div class="update-actions">
           <button class="button button--primary button--wide" id="update-now" type="button" hidden>立即更新 <span>→</span></button>
-          <button class="button button--primary button--wide" id="update-apply" type="button" hidden>重启并更新 <span>→</span></button>
+          <button class="button button--primary button--wide" id="update-apply" type="button" hidden>打开安装器安装 <span>→</span></button>
           <button class="button button--secondary" id="update-cancel" type="button" hidden>取消下载</button>
         </div>
-      </main>
-
-      <main class="tool-stage" id="uninstall-app" hidden>
-        <div class="stage-heading">
-          <div>
-            <p class="eyebrow">REMOVE INSTALLATION</p>
-            <h1>卸载程序</h1>
-          </div>
-        </div>
-        <p class="plugin-intro">一键卸载会结束正在运行的 DSH Desktop，删除安装目录、桌面/开始菜单快捷方式和注册表项。对话和设置保存在用户目录，默认不会删。</p>
-        <div class="done-card">
-          <div class="done-card__head"><strong>将移除</strong></div>
-          <div class="done-card__line">安装目录里的应用与运行时</div>
-          <div class="done-card__line">桌面和开始菜单快捷方式（含「卸载 DSH Desktop」）</div>
-          <div class="done-card__line">Windows 应用列表中的卸载项</div>
-        </div>
-        <div class="update-actions">
-          <button class="button button--primary button--wide" id="uninstall-now" type="button">一键卸载 <span>→</span></button>
-        </div>
-        <div class="update-status" id="uninstall-status" role="status" aria-live="polite"></div>
       </main>
 
       <main class="tool-stage" id="vision-plugin" hidden>

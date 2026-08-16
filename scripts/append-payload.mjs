@@ -40,7 +40,10 @@ console.log('building the native loader…')
 // window next to the installer on every double-click. GUI subsystem keeps the
 // window clean; the reg/powershell children must then use CREATE_NO_WINDOW
 // (see loader/main.go) or they would flash their own consoles during install.
-execFileSync('go', ['build', '-ldflags', '-s -w -H windowsgui', '-o', loaderExe, '.'], { cwd: loaderDir, stdio: 'inherit' })
+const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
+const appVersion = String(pkg.version ?? '').trim()
+if (appVersion === '') throw new Error('package.json is missing a version')
+execFileSync('go', ['build', '-ldflags', `-s -w -H windowsgui -X main.appVersion=${appVersion}`, '-o', loaderExe, '.'], { cwd: loaderDir, stdio: 'inherit' })
 
 // Explorer needs the icon in the PE resources; rcedit runs BEFORE the payload
 // containers are appended so the trailing data survives untouched. (The Go
@@ -51,6 +54,19 @@ const rceditDir = (await readdir(pnpm)).find((name) => name.startsWith('electron
 if (rceditDir === undefined) throw new Error('rcedit.exe not found (electron-winstaller vendor)')
 const rcedit = path.join(pnpm, rceditDir, 'node_modules', 'electron-winstaller', 'vendor', 'rcedit.exe')
 execFileSync(rcedit, [loaderExe, '--set-icon', path.join(root, 'assets', 'icon.ico')], { stdio: 'ignore' })
+
+console.log('building Uninstall.exe…')
+const uninstallExe = path.join(shellRoot, 'Uninstall.exe')
+execFileSync('go', ['build', '-ldflags', '-s -w -H windowsgui', '-o', uninstallExe, '.'], {
+  cwd: path.join(root, 'uninstaller'),
+  stdio: 'inherit',
+})
+execFileSync(rcedit, [
+  uninstallExe,
+  '--set-icon', path.join(root, 'assets', 'icon.ico'),
+  '--set-version-string', 'FileDescription', '卸载 DSH Desktop',
+  '--set-version-string', 'ProductName', 'DSH Desktop',
+], { stdio: 'ignore' })
 
 async function collect(dir) {
   const files = []

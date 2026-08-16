@@ -300,8 +300,6 @@ var (
 	doneOk        = false
 	doneText      = ""
 
-	// Page headings differ between a fresh install and a self-update
-	// (runWorkerMode switches these before the progress page appears).
 	progressHeading = "正在安装"
 	doneHeading     = "安装完成"
 
@@ -1184,15 +1182,20 @@ func warmWorker(warmDone chan struct{}) {
 	}
 }
 
+// appVersion is injected by append-payload.mjs via -X main.appVersion.
+var appVersion = "0.0.0"
+
 func registerApp(target string) error {
 	exe := filepath.Join(target, "DSH Desktop.exe")
+	uninstaller := filepath.Join(target, "Uninstall.exe")
 	key := `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\2964e23e-3f18-500c-b3e7-68e9fa24df7a`
 	values := [][2]string{
 		{"DisplayName", "DSH Desktop"},
-		{"DisplayVersion", "0.1.2"},
+		{"DisplayVersion", appVersion},
 		{"Publisher", "DSH Desktop"},
 		{"InstallLocation", target},
-		{"UninstallString", `"` + exe + `" --uninstall`},
+		{"UninstallString", `"` + uninstaller + `"`},
+		{"QuietUninstallString", `"` + uninstaller + `" --silent`},
 		{"DisplayIcon", exe + ",0"},
 	}
 	for _, v := range values {
@@ -1203,11 +1206,12 @@ func registerApp(target string) error {
 
 func createShortcuts(target string) error {
 	exe := filepath.Join(target, "DSH Desktop.exe")
+	uninstaller := filepath.Join(target, "Uninstall.exe")
 	ps := "$ws = New-Object -ComObject WScript.Shell;"
 	ps += " foreach ($p in @('" + os.Getenv("USERPROFILE") + "\\Desktop\\DSH Desktop.lnk', '" + os.Getenv("APPDATA") + "\\Microsoft\\Windows\\Start Menu\\Programs\\DSH Desktop.lnk')) {"
 	ps += " $s = $ws.CreateShortcut($p); $s.TargetPath = '" + exe + "'; $s.IconLocation = '" + exe + ",0'; $s.Save() };"
 	ps += " $u = $ws.CreateShortcut('" + os.Getenv("APPDATA") + "\\Microsoft\\Windows\\Start Menu\\Programs\\卸载 DSH Desktop.lnk');"
-	ps += " $u.TargetPath = '" + exe + "'; $u.Arguments = '--uninstall'; $u.IconLocation = '" + exe + ",0'; $u.Save()"
+	ps += " $u.TargetPath = '" + uninstaller + "'; $u.IconLocation = '" + exe + ",0'; $u.Description = '卸载 DSH Desktop'; $u.Save()"
 	return hideConsole(exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)).Run()
 }
 
@@ -1355,72 +1359,11 @@ func setupWindow(img image.Image) bool {
 	return true
 }
 
-// runWorkerMode is the self-update worker with a visible progress window:
-// the built-in updater (electron/updater.mjs) downloads the new setup exe and
-// runs it elevated with `--installer-worker <dir> [--relaunch]`. The overlay
-// install takes tens of seconds (440 MB + warm-up), so it must NOT run
-// silently — the user watches the same progress page as a fresh install, and
-// on completion the app relaunches (--relaunch) and the window closes itself.
-func runWorkerMode(target string, relaunch bool) {
-	img, _, err := image.Decode(bytes.NewReader(bgPng))
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "failed to decode the background:", err)
-		return
-	}
-	if !setupWindow(img) {
-		return
-	}
-	installDir = target
-	progressHeading = "正在更新"
-	doneHeading = "更新完成"
-	statusText = "准备更新…"
-	setPage(pageProgress, nil)
-	procShowWindow.Call(hwnd, SW_SHOW)
-	procUpdateWindow.Call(hwnd)
-	go func() {
-		err := installTo(target)
-		if err != nil {
-			doneOk = false
-			doneText = "更新失败：" + err.Error()
-			fmt.Fprintln(os.Stderr, "installer worker failed:", err)
-			if log, openErr := os.OpenFile(`C:\dsh-desktop-install.log`, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); openErr == nil {
-				log.WriteString(time.Now().Format("2006-01-02 15:04:05") + " | error | worker: " + err.Error() + "\n")
-				log.Close()
-			}
-			setPage(pageDone, []button{
-				{x: 590, y: 386, w: 130, h: 44, label: "关闭", primary: true, click: func() {
-					procPostMessage.Call(hwnd, WM_CLOSE, 0, 0)
-				}},
-			})
-			return
-		}
-		doneOk = true
-		doneText = "更新完成：" + target
-		if relaunch {
-			installedExe := filepath.Join(target, "DSH Desktop.exe")
-			if _, statErr := os.Stat(installedExe); statErr == nil {
-				hideConsole(exec.Command("explorer.exe", installedExe)).Start()
-			}
-		}
-		// Let the user see the completion state before the window closes.
-		time.Sleep(1200 * time.Millisecond)
-		procPostMessage.Call(hwnd, WM_CLOSE, 0, 0)
-	}()
-	runMessageLoop()
-}
-
 func main() {
 	runtime.LockOSThread()
 	// `--dir <path>` marks the elevated handoff from startInstall: the window
 	// opens straight into the progress page and installs to that directory.
 	autoDir := ""
-	// `--installer-worker <path> [--relaunch]` is the self-update worker:
-	// the built-in updater runs the downloaded setup exe elevated with these
-	// args; the worker shows a progress window, overlays the shell + runtime
-	// onto the install directory, and (with --relaunch) starts the freshly
-	// updated app through explorer.exe with the user's normal token.
-	workerDir := ""
-	workerRelaunch := false
 	for i := 1; i < len(os.Args); i++ {
 		switch os.Args[i] {
 		case "--dir":
@@ -1428,18 +1371,7 @@ func main() {
 				autoDir = os.Args[i+1]
 				i++
 			}
-		case "--installer-worker":
-			if i+1 < len(os.Args) {
-				workerDir = os.Args[i+1]
-				i++
-			}
-		case "--relaunch":
-			workerRelaunch = true
 		}
-	}
-	if workerDir != "" {
-		runWorkerMode(workerDir, workerRelaunch)
-		return
 	}
 	// One installer window per session: a second launch activates the first.
 	// The elevation handoff instance (--dir) retries briefly while the

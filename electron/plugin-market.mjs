@@ -5,10 +5,11 @@
  * DSH plugins are Cordis bundles: `dsh plugin` forwards to pnpm in
  * `$DSH_HOME/profiles/web`, then reconciles `dsh.profile.bundles`.
  */
-import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { readFile, readdir } from 'node:fs/promises'
+import { spawn, execFile } from 'node:child_process'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync, cpSync } from 'node:fs'
+import { readFile, readdir, mkdtemp, rm } from 'node:fs/promises'
 import path from 'node:path'
+import { tmpdir } from 'node:os'
 
 const GITHUB_SEARCH = 'https://api.github.com/search/repositories?q=topic:dsh-plugin&sort=stars&order=desc&per_page=30'
 const USER_AGENT = 'dsh-desktop-plugin-market'
@@ -166,22 +167,230 @@ function spawnDshPlugin(options, args) {
   })
 }
 
+function readJson(file, fallback) {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    return fallback
+  }
+}
+
+function pluginRowId(name) {
+  const cleaned = String(name).replace(/^@[^/]+\//, '').replace(/[^a-z0-9-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase()
+  return cleaned === '' ? 'plugin' : cleaned
+}
+
+function parseGithubSpec(spec) {
+  const github = /^github:([^/#\s]+)\/([^/#\s]+)(?:#([^\s]+))?$/i.exec(spec)
+  if (github) {
+    return { owner: github[1], repo: github[2].replace(/\.git$/i, ''), ref: github[3] ?? '' }
+  }
+  const url = /^https?:\/\/github\.com\/([^/#\s]+)\/([^/#\s]+?)(?:\.git)?(?:\/(?:tree|commit)\/([^/?#\s]+))?\/?$/i.exec(spec)
+  if (url) {
+    return { owner: url[1], repo: url[2], ref: url[3] ?? '' }
+  }
+  return null
+}
+
+function runTar(args) {
+  return new Promise((resolve, reject) => {
+    execFile('tar', args, { windowsHide: true }, (error, _stdout, stderr) => {
+      if (error) reject(new Error(String(stderr || error.message || error)))
+      else resolve()
+    })
+  })
+}
+
+async function downloadGithubZip(owner, repo, ref) {
+  const refs = ref !== ''
+    ? [ref, `refs/heads/${ref}`, `refs/tags/${ref}`]
+    : ['refs/heads/main', 'refs/heads/master']
+  let lastError = '无法下载仓库'
+  for (const item of refs) {
+    const url = `https://codeload.github.com/${owner}/${repo}/zip/${item}`
+    try {
+      const response = await fetch(url, {
+        headers: { 'user-agent': USER_AGENT, accept: 'application/octet-stream' },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(60_000),
+      })
+      if (!response.ok) {
+        lastError = `GitHub HTTP ${response.status}（${item}）`
+        continue
+      }
+      const buffer = Buffer.from(await response.arrayBuffer())
+      if (buffer.length < 64) {
+        lastError = `下载内容过短（${item}）`
+        continue
+      }
+      return buffer
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error)
+    }
+  }
+  throw new Error(lastError)
+}
+
+function findPackageRoot(dir) {
+  if (existsSync(path.join(dir, 'package.json'))) return dir
+  for (const name of readdirSync(dir)) {
+    const child = path.join(dir, name)
+    try {
+      if (statSync(child).isDirectory() && existsSync(path.join(child, 'package.json'))) return child
+    } catch {
+      // Skip unreadable entries.
+    }
+  }
+  return null
+}
+
+function registerProfilePlugin(profileDir, pkgName, spec, isBundle) {
+  const manifestFile = path.join(profileDir, 'package.json')
+  const manifest = readJson(manifestFile, { name: 'dsh-profile-web', private: true })
+  if (!manifest.dependencies || typeof manifest.dependencies !== 'object') manifest.dependencies = {}
+  manifest.dependencies[pkgName] = spec
+  if (!manifest.dsh || typeof manifest.dsh !== 'object') manifest.dsh = {}
+  if (!manifest.dsh.profile || typeof manifest.dsh.profile !== 'object') manifest.dsh.profile = {}
+  if (!Array.isArray(manifest.dsh.profile.bundles)) {
+    manifest.dsh.profile.bundles = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']
+  }
+  if (isBundle && !manifest.dsh.profile.bundles.includes(pkgName)) {
+    manifest.dsh.profile.bundles.push(pkgName)
+  }
+  writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n')
+
+  if (isBundle) return
+  const patchFile = path.join(profileDir, 'cordis.patch.yml')
+  const id = pluginRowId(pkgName)
+  let patch = existsSync(patchFile) ? readFileSync(patchFile, 'utf8') : ''
+  if (new RegExp(`(?:^|\\n)\\s*-?\\s*id\\s*:\\s*${id}\\b`).test(`\n${patch}`)) return
+  const block = `- insert:\n    - id: ${id}\n      name: '${pkgName}'\n`
+  if (patch.trim() === '') patch = '# dsh web profile patch（由 DSH Desktop 维护）\n' + block
+  else patch = patch.replace(/\s*$/, '\n') + block
+  writeFileSync(patchFile, patch)
+}
+
+function unregisterProfilePlugin(profileDir, pkgName) {
+  const manifestFile = path.join(profileDir, 'package.json')
+  const manifest = readJson(manifestFile, null)
+  if (manifest) {
+    if (manifest.dependencies && typeof manifest.dependencies === 'object') {
+      delete manifest.dependencies[pkgName]
+    }
+    const bundles = manifest.dsh?.profile?.bundles
+    if (Array.isArray(bundles)) {
+      manifest.dsh.profile.bundles = bundles.filter((name) => name !== pkgName)
+    }
+    writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n')
+  }
+  const patchFile = path.join(profileDir, 'cordis.patch.yml')
+  if (!existsSync(patchFile)) return
+  const id = pluginRowId(pkgName)
+  const next = readFileSync(patchFile, 'utf8')
+    .replace(new RegExp(`(?:\\r?\\n)?- insert:\\r?\\n\\s+- id: ${id}\\b[^\\n]*\\r?\\n\\s+name: ['"]${pkgName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]\\s*`, 'g'), '\n')
+  writeFileSync(patchFile, next)
+}
+
+async function copyPluginIntoProfile(dshHome, sourceDir, spec) {
+  const pkg = readJson(path.join(sourceDir, 'package.json'), null)
+  const pkgName = typeof pkg?.name === 'string' && pkg.name !== '' ? pkg.name : null
+  if (pkgName === null) return { ok: false, error: '插件包缺少 package.json name' }
+  const profileDir = path.join(dshHome, 'profiles', 'web')
+  const dest = path.join(profileDir, 'node_modules', pkgName)
+  mkdirSync(path.dirname(dest), { recursive: true })
+  if (existsSync(dest)) rmSync(dest, { recursive: true, force: true })
+  cpSync(sourceDir, dest, { recursive: true, force: true })
+  const isBundle = pkg?.dsh?.bundle?.patch !== undefined
+  registerProfilePlugin(profileDir, pkgName, spec, isBundle)
+  return { ok: true, name: pkgName, bundle: isBundle }
+}
+
+async function installPluginNative(dshHome, spec) {
+  if (spec.startsWith('file:')) {
+    const from = spec.slice('file:'.length)
+    if (!existsSync(from)) return { ok: false, error: `本地路径不存在：${from}` }
+    return copyPluginIntoProfile(dshHome, from, spec)
+  }
+  const github = parseGithubSpec(spec)
+  if (github === null) {
+    return { ok: false, error: '当前环境无法走官方 pnpm 通道，只支持 github:owner/repo 或本地 file: 路径' }
+  }
+  const scratch = await mkdtemp(path.join(tmpdir(), 'dsh-plugin-'))
+  try {
+    const zipPath = path.join(scratch, 'plugin.zip')
+    writeFileSync(zipPath, await downloadGithubZip(github.owner, github.repo, github.ref))
+    const unpacked = path.join(scratch, 'unpacked')
+    mkdirSync(unpacked, { recursive: true })
+    await runTar(['-xf', zipPath, '-C', unpacked])
+    const root = findPackageRoot(unpacked)
+    if (root === null) return { ok: false, error: '下载的仓库里没有 package.json' }
+    const result = await copyPluginIntoProfile(dshHome, root, `github:${github.owner}/${github.repo}${github.ref ? '#' + github.ref : ''}`)
+    if (result.ok) result.log = `已从 GitHub 安装 ${result.name}`
+    return result
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  } finally {
+    await rm(scratch, { recursive: true, force: true }).catch(() => {})
+  }
+}
+
+function removePluginNative(dshHome, name) {
+  const profileDir = path.join(dshHome, 'profiles', 'web')
+  const dest = path.join(profileDir, 'node_modules', name)
+  if (existsSync(dest)) rmSync(dest, { recursive: true, force: true })
+  unregisterProfilePlugin(profileDir, name)
+  return { ok: true, name }
+}
+
 /** Install one plugin spec into the web profile. */
 export async function installPlugin(options, spec) {
   const cleaned = String(spec ?? '').trim()
   if (cleaned === '') return { ok: false, error: '缺少插件规格' }
+
+  const tryNative = async () => installPluginNative(options.dshHome, cleaned)
+
+  if (options.packaged) {
+    const native = await tryNative()
+    if (native.ok) {
+      return { ok: true, spec: cleaned, log: native.log || `已安装 ${native.name}` }
+    }
+    const result = await spawnDshPlugin(options, ['add', cleaned])
+    if (result.ok) {
+      return { ok: true, spec: cleaned, log: (result.stdout + '\n' + result.stderr).trim() }
+    }
+    const log = (result.stdout + '\n' + result.stderr).trim()
+    return {
+      ok: false,
+      spec: cleaned,
+      error: native.error || log || '安装失败',
+      command: `dsh plugin --profile web add ${cleaned}`,
+    }
+  }
+
   const result = await spawnDshPlugin(options, ['add', cleaned])
   if (result.ok) {
     return { ok: true, spec: cleaned, log: (result.stdout + '\n' + result.stderr).trim() }
   }
   const log = (result.stdout + '\n' + result.stderr).trim()
   const missingPnpm = /pnpm not found/i.test(log) || result.code === 127
+  if (missingPnpm || parseGithubSpec(cleaned) !== null || cleaned.startsWith('file:')) {
+    const native = await tryNative()
+    if (native.ok) {
+      return { ok: true, spec: cleaned, log: native.log || `已安装 ${native.name}` }
+    }
+    return {
+      ok: false,
+      spec: cleaned,
+      error: native.error || (missingPnpm
+        ? '本机未找到 pnpm，且无法直接安装该规格。请改用 github:owner/repo'
+        : log),
+      command: `dsh plugin --profile web add ${cleaned}`,
+    }
+  }
   return {
     ok: false,
     spec: cleaned,
-    error: missingPnpm
-      ? '本机未找到 pnpm。请先安装 pnpm，或在终端执行：dsh plugin --profile web add ' + cleaned
-      : (log || `安装失败（退出码 ${result.code}）`),
+    error: log || `安装失败（退出码 ${result.code}）`,
     command: `dsh plugin --profile web add ${cleaned}`,
   }
 }
@@ -192,10 +401,15 @@ export async function removePlugin(options, name) {
   if (cleaned === '') return { ok: false, error: '缺少插件名' }
   const result = await spawnDshPlugin(options, ['remove', cleaned])
   if (result.ok) return { ok: true, name: cleaned }
+  const log = (result.stdout + '\n' + result.stderr).trim()
+  const missingPnpm = /pnpm not found/i.test(log) || result.code === 127
+  if (options.packaged || missingPnpm) {
+    return removePluginNative(options.dshHome, cleaned)
+  }
   return {
     ok: false,
     name: cleaned,
-    error: (result.stdout + '\n' + result.stderr).trim() || `卸载失败（退出码 ${result.code}）`,
+    error: log || `卸载失败（退出码 ${result.code}）`,
   }
 }
 

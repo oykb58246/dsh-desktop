@@ -28,6 +28,7 @@ import { injectTurnChrome } from './turn-chrome.mjs'
 import { registerWorkspaceIpc } from './workspace-io.mjs'
 import { registerFileRevertIpc } from './file-revert.mjs'
 import { syncCompanionPlugins } from './companion-plugins.mjs'
+import { syncCompanionPresets } from './companion-presets.mjs'
 import {
   listInstalledPlugins, searchPlugins, installPlugin, removePlugin, listLocalDrops,
 } from './plugin-market.mjs'
@@ -351,7 +352,22 @@ app.setAppUserModelId('com.oykb58246.dsh-desktop')
 
 // ---------- installer constants & modes ----------
 const APP_GUID = '2964e23e-3f18-500c-b3e7-68e9fa24df7a'
-const APP_VERSION = '0.1.2'
+function readAppVersion() {
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(desktopRoot, 'package.json'), 'utf8'))
+    if (typeof parsed?.version === 'string' && parsed.version !== '') return parsed.version
+  } catch {
+    // Fall through to Electron's own package version.
+  }
+  try {
+    const version = app.getVersion()
+    if (typeof version === 'string' && version !== '') return version
+  } catch {
+    // Installer workers may not have a packed app version yet.
+  }
+  return '0.0.0'
+}
+const APP_VERSION = readAppVersion()
 const UNINSTALL_KEY = 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + APP_GUID
 const INI_PATH = 'C:\\dsh-desktop.ini'
 const INSTALL_LOG = 'C:\\dsh-desktop-install.log'
@@ -540,8 +556,6 @@ function ensureTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '显示主窗口', click: () => restoreMainWindow() },
     { type: 'separator' },
-    { label: '卸载 DSH Desktop', click: () => { void requestUninstall() } },
-    { type: 'separator' },
     { label: '退出', click: () => quitApp() },
   ]))
   tray.on('click', () => restoreMainWindow())
@@ -669,6 +683,36 @@ ipcMain.handle('plugin:remove', (_event, name) => removePlugin({
   harnessRoot,
   dshHome: dshHomeDir,
 }, name))
+
+// ---------- side card preferences (dsh-better-sidebar settings seam) ----------
+
+/** Call one fenced /sidebar/api route on the running harness (plain JSON RPC). */
+async function callSidebarApi(method, payload) {
+  if (harnessUrl === null) throw new Error('DSH 服务尚未就绪')
+  const response = await fetch(`${harnessUrl}/sidebar/api/${method}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload ?? {}),
+  })
+  const json = await response.json().catch(() => null)
+  if (json === null || json.ok !== true) {
+    throw new Error(json?.error?.message ?? `sidebar API ${method} 失败（HTTP ${response.status}）`)
+  }
+  return json.value
+}
+
+ipcMain.handle('sidebar-prefs:get', async () => {
+  const value = await callSidebarApi('settings.get', {})
+  return { value: value?.value ?? null, revision: value?.revision ?? null }
+})
+
+ipcMain.handle('sidebar-prefs:update', async (_event, patch, expectedRevision) => {
+  const value = await callSidebarApi('settings.update', {
+    patch: patch ?? {},
+    expectedRevision: typeof expectedRevision === 'number' ? expectedRevision : undefined,
+  })
+  return { value: value?.value ?? null, revision: value?.revision ?? null }
+})
 
 // ---------- archive management (harness workspace archive/restore) ----------
 
@@ -1248,6 +1292,33 @@ async function injectChangelogDialog(entries, kind) {
   })()`)
 }
 
+/** Hide the leftover DSH Settings nav item; the panel now lives in 工具区. */
+async function injectHideSideCardSettings(webContents) {
+  if (webContents === undefined || webContents.isDestroyed()) return
+  await webContents.executeJavaScript(`(() => {
+    if (window.__dshHideSideCardSettings) return;
+    window.__dshHideSideCardSettings = true;
+    const match = (text) => {
+      const value = String(text || '').replace(/\\s+/g, ' ').trim();
+      return value === '侧边卡片' || value === 'Side card';
+    };
+    let timer = 0;
+    const hide = () => {
+      for (const el of document.querySelectorAll('button, a, [role="tab"], [role="menuitem"]')) {
+        if (!match(el.textContent)) continue;
+        const row = el.closest('button, a, [role="tab"], [role="menuitem"], li') || el;
+        row.style.setProperty('display', 'none', 'important');
+      }
+    };
+    const schedule = () => {
+      if (timer) return;
+      timer = window.setTimeout(() => { timer = 0; hide(); }, 80);
+    };
+    hide();
+    new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
+  })()`)
+}
+
 async function injectWindowChrome() {
   if (mainWindow === null || mainWindow.isDestroyed()) return
   const iconSvg = readFileSync(appLogoPath).toString('base64')
@@ -1256,7 +1327,7 @@ async function injectWindowChrome() {
     if (document.getElementById('dsh-window-chrome')) return;
     const bar = document.createElement('div');
     bar.id = 'dsh-window-chrome';
-    bar.innerHTML = '<img class="dsh-window-icon" src="${iconUrl}"/><span class="dsh-window-title">DSH Desktop</span><div class="dsh-window-actions"><button class="dsh-title-button dsh-tools" data-action="tools" aria-label="工具区" title="工具区"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4.5 4.5 0 0 0-6.1 5.4L3 17.3V21h3.7l5.6-5.6a4.5 4.5 0 0 0 5.4-6.1l-3.2 3.2-2.8-.7-.7-2.8 3.7-3.7z"/></svg></button><button class="dsh-title-button dsh-minimize" data-action="minimize" aria-label="Minimize"></button><button class="dsh-title-button dsh-maximize" data-action="maximize" aria-label="Maximize"></button><button class="dsh-title-button dsh-close" data-action="close" aria-label="Close"></button></div>';
+    bar.innerHTML = '<img class="dsh-window-icon" src="${iconUrl}"/><span class="dsh-window-title">DSH Desktop</span><div class="dsh-desk-toggle-zone"></div><div class="dsh-window-actions"><button class="dsh-title-button dsh-tools" data-action="tools" aria-label="工具区" title="工具区"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4.5 4.5 0 0 0-6.1 5.4L3 17.3V21h3.7l5.6-5.6a4.5 4.5 0 0 0 5.4-6.1l-3.2 3.2-2.8-.7-.7-2.8 3.7-3.7z"/></svg></button><button class="dsh-title-button dsh-minimize" data-action="minimize" aria-label="Minimize"></button><button class="dsh-title-button dsh-maximize" data-action="maximize" aria-label="Maximize"></button><button class="dsh-title-button dsh-close" data-action="close" aria-label="Close"></button></div>';
     const style = document.createElement('style');
     style.textContent = \`
       #dsh-window-chrome { position: fixed; inset: 0 0 auto 0; height: 42px; z-index: 2147483600; display:flex; align-items:center; gap:10px; padding:0 10px 0 14px; color:#eef3ff; background:#171d2a; border-bottom:1px solid rgba(255,255,255,.08); font:600 13px "Segoe UI", "Microsoft YaHei", sans-serif; -webkit-app-region:drag; user-select:none; }
@@ -1285,6 +1356,11 @@ async function injectWindowChrome() {
       body { height:100% !important; max-height:100% !important; box-sizing:border-box !important; overflow:hidden !important; padding-top:42px !important; }
       [class*="toggleCluster"] { top: 7px !important; right: 214px !important; z-index: 2147483647 !important; }
       #dsh-window-chrome .dsh-desk-toggle, #dsh-desk-side, #dsh-desk-term { display: none !important; }
+      /* Electron 的 -webkit-app-region 拖拽区域按矩形命中、不感知 z-index：侧边栏
+         开关按钮（.toggleCluster，位于本条带内）若不加 no-drag 挖空，点击会被当成
+         拖动窗口吞掉。此透明区域与 cluster 的几何（right:214 / 宽60 / 高42）对齐，
+         只让出这一小块拖拽区，按钮即可正常点击。 */
+      #dsh-window-chrome .dsh-desk-toggle-zone { position:absolute; top:0; right:214px; width:60px; height:42px; -webkit-app-region:no-drag; }
     \`;
     document.head.appendChild(style); document.body.appendChild(bar);
     document.documentElement.setAttribute('data-dsh-title-bar-height', '42');
@@ -1390,6 +1466,11 @@ async function launchHarness() {
         } catch (error) {
           startupLog('turn chrome inject failed: ' + String(error))
         }
+        try {
+          await injectHideSideCardSettings(mainWindow.webContents)
+        } catch (error) {
+          startupLog('hide side-card settings inject failed: ' + String(error))
+        }
         await maybeShowChangelog()
         expandMainWindow()
         resolve()
@@ -1457,6 +1538,17 @@ async function boot() {
       })
     } catch (error) {
       startupLog('companion sync failed: ' + String(error))
+    }
+    try {
+      const packedPresets = path.join(import.meta.dirname, 'agent-presets')
+      const unpackedPresets = path.join(process.resourcesPath, 'app.asar.unpacked', 'electron', 'agent-presets')
+      syncCompanionPresets({
+        presetsRoot: existsSync(unpackedPresets) ? unpackedPresets : packedPresets,
+        dshHome: dshHomeDir,
+        log: (line) => startupLog('preset: ' + line),
+      })
+    } catch (error) {
+      startupLog('preset sync failed: ' + String(error))
     }
     // Stage the post-install/post-update changelog dialog before the harness
     // page exists; finishStartup shows it once the page is loaded.
@@ -1754,6 +1846,7 @@ async function extractRuntimePayload(exePath, targetDir, write) {
 
 async function createShortcuts(targetDir, write) {
   const exe = path.join(targetDir, 'DSH Desktop.exe')
+  const uninstaller = path.join(targetDir, 'Uninstall.exe')
   const desktopLink = 'C:\\Users\\Public\\Desktop\\DSH Desktop.lnk'
   const menuLink = 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\DSH Desktop.lnk'
   const uninstallLink = 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\卸载 DSH Desktop.lnk'
@@ -1762,8 +1855,8 @@ async function createShortcuts(targetDir, write) {
     + ` $s = $ws.CreateShortcut($p); $s.TargetPath = '${exe}';`
     + ` $s.IconLocation = '${exe},0'; $s.WorkingDirectory = '${targetDir}';`
     + ` $s.Description = 'DeepSeek Harness Desktop'; $s.Save() };`
-    + ` $u = $ws.CreateShortcut('${uninstallLink}'); $u.TargetPath = '${exe}';`
-    + ` $u.Arguments = '--uninstall'; $u.IconLocation = '${exe},0';`
+    + ` $u = $ws.CreateShortcut('${uninstallLink}'); $u.TargetPath = '${uninstaller}';`
+    + ` $u.IconLocation = '${exe},0';`
     + ` $u.Description = '卸载 DSH Desktop'; $u.Save()`
   await runPowershell(ps)
   // Explorer caches shortcut icons by target path; refresh the cache so the
@@ -1784,8 +1877,8 @@ async function writeRegistry(targetDir, write) {
     ['DisplayVersion', APP_VERSION],
     ['Publisher', 'DSH Desktop'],
     ['InstallLocation', targetDir],
-    ['UninstallString', `"${exe}" --uninstall`],
-    ['QuietUninstallString', `"${exe}" --uninstall --silent`],
+    ['UninstallString', `"${path.join(targetDir, 'Uninstall.exe')}"`],
+    ['QuietUninstallString', `"${path.join(targetDir, 'Uninstall.exe')}" --silent`],
     ['DisplayIcon', `${exe},0`],
   ]
   for (const [name, value] of values) {
@@ -2074,7 +2167,6 @@ app.whenReady().then(() => {
         toolsWindow.webContents.send('update:progress', payload)
       }
     },
-    requestQuit: () => app.quit(),
   })
   // Installer UI preview: `--installer-ui` opens the installer window in any
   // mode (dev included) so the three-step flow can be reviewed without a real

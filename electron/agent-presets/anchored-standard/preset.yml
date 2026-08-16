@@ -1,0 +1,3 @@
+name: 锚定标准
+description: 实验模式。首轮只用极简的 bash + str_replace_editor，不自动注入工作区或技能摘要；会话稳住后再按需解锁标准工具。
+order: 5

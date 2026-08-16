@@ -21,9 +21,8 @@ import { registerOpenPathInterception, registerTurnTailInterception } from './in
 import { registerLinkInterception } from './link-intercept.ts'
 import { registerImeGuard } from './ime-guard.ts'
 import { loadPrefs } from './prefs.ts'
-import { SideCardSection } from './SideCardSection.tsx'
 import { api } from './api.ts'
-import { LOCALE_NS, attachLocale, t, zh, en } from './locales.ts'
+import { LOCALE_NS, attachLocale, zh, en } from './locales.ts'
 import css from './sidebar.module.css'
 import './layout.css'
 
@@ -213,18 +212,8 @@ export function apply(ctx: Context): void {
       'dsh-better-sidebar: IME composition guard',
     )
 
-    // The "Side card" settings section: appears in the DSH Settings shell
-    // once the shell's declaration is on the ledger (slots.inject waits for
-    // it); the section reads/writes the prefs through the plugin's own
-    // fenced settings route, keeps the shared store in sync, and renders the
-    // declarative enable/disable inventory from the tab/viewer registry.
-    ctx.slots.inject('settings.section', () => ctx.slots.register({
-      name: 'settings.section',
-      id: 'better-sidebar',
-      order: 100,
-      label: () => t('settingsNav'),
-      inject: () => ({ store: sidebarStore, service }),
-    }, SideCardSection))
+    // The Side card settings live in the desktop tools window (扳手 → 侧边卡片).
+    // Do not also register a DSH Settings shell section.
   } catch (error) {
     fail('load', error)
   }

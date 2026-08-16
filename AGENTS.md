@@ -19,4 +19,6 @@
 - **effort（推理强度）取值永远用英文**：`low / high / xhigh / max / ultra`，中文英文界面都一样。
 - **视觉插件只支持 OpenAI 兼容协议**；默认模型 `qwen-vl-max`（`-latest` 别名会 403）。
 - **Codex 导入不复制文件**：注册工作区引用原目录 + 导入会话；同名不同目录的已导入项目可重复导入。
+- **内置社区 Agent 模式**：`electron/agent-presets/` 里的「锚定标准」「路由标准」启动时同步到 `$DSH_HOME/.agent-presets`；不要改成改官方 `deepseek-harness/apps/cli/config/agent-presets`。
+- **卸载只走安装目录 `Uninstall.exe`**：不要再往工具区或托盘菜单里塞卸载。
 - 官方下载站 `ds.oykb.cn`。

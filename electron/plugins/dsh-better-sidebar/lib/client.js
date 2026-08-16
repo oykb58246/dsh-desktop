@@ -8929,16 +8929,7 @@ window.__ModuleLoader__.load({
 						return;
 					}
 				}, "dsh-better-sidebar: IME composition guard");
-				ctx.slots.inject("settings.section", () => ctx.slots.register({
-					name: "settings.section",
-					id: "better-sidebar",
-					order: 100,
-					label: () => t("settingsNav"),
-					inject: () => ({
-						store: sidebarStore,
-						service
-					})
-				}, SideCardSection));
+				// Side card settings are hosted in the desktop tools window.
 			} catch (error) {
 				fail("load", error);
 			}

@@ -451,6 +451,9 @@ function switchTool(name) {
   if (name === 'plugin-market') {
     void refreshPlugins()
   }
+  if (name === 'side-card') {
+    void refreshSideCard()
+  }
 }
 
 // ---------- update check panel ----------
@@ -540,11 +543,9 @@ function renderUpdateInfo(info) {
         downloaded.sha512Ok === true ? ' · sha512 校验通过'
           : downloaded.sha512Ok === null ? ' · 官方基线未提供 sha512（未校验）' : ''}`)
     $('update-now').hidden = true
-    $('update-apply').hidden = !info.installed
+    $('update-apply').hidden = false
     $('update-cancel').hidden = true
-    setUpdateStatus('available', info.installed
-      ? '更新包已就绪，点击「重启并更新」完成更新。'
-      : '更新包已就绪。开发模式无法自动更新，请使用安装版。')
+    setUpdateStatus('available', '更新包已就绪，点击「打开安装器安装」启动安装程序，按安装流程完成更新。')
   } else {
     $('update-progress-box').hidden = true
     $('update-cancel').hidden = true
@@ -607,11 +608,13 @@ async function cancelDownload() {
 
 async function applyUpdateNow() {
   if (updateState.info?.downloaded?.ready !== true) return
-  setUpdateStatus('checking', '正在启动更新程序并退出当前应用…（如弹出 UAC 授权窗口，请选择「是」）')
+  setUpdateStatus('checking', '正在打开安装程序…')
   try {
     await api.updateApply()
+    setUpdateStatus('ok', '安装程序已打开。请在安装器窗口中选择目录并点击「安装」完成更新，当前应用无需退出。')
+    $('update-apply').hidden = true
   } catch (error) {
-    showToast(`启动更新失败：${error.message ?? String(error)}`, true)
+    showToast(`打开安装程序失败：${error.message ?? String(error)}`, true)
     try { renderUpdateInfo(await api.updateInfo()) } catch { /* keep current view */ }
   }
 }
@@ -1160,17 +1163,173 @@ function wirePluginPanel() {
   $('plugin-search').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') void refreshPlugins()
   })
+  const installSpec = () => {
+    const spec = $('plugin-spec').value.trim()
+    if (spec === '') {
+      showToast('请填写 github:owner/repo', true)
+      return
+    }
+    void installListedPlugin(spec)
+  }
+  $('plugin-spec-btn').addEventListener('click', installSpec)
+  $('plugin-spec').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') installSpec()
+  })
 }
 
-function wireUninstallPanel() {
-  $('uninstall-now').addEventListener('click', async () => {
-    $('uninstall-status').className = 'update-status update-status--checking'
-    $('uninstall-status').textContent = '即将拉起卸载脚本并退出应用…'
-    const result = await api.startUninstall()
-    if (result?.cancelled) {
-      $('uninstall-status').className = 'update-status'
-      $('uninstall-status').textContent = '已取消卸载。'
-    }
+const SIDE_CARD_DEFAULTS = {
+  openByDefault: true,
+  defaultWidthPercent: 30,
+  autoOpenSubagent: true,
+  autoOpenJobs: true,
+  agentTerminalTools: false,
+  bottomPanelAutoTerminal: true,
+  interceptOpenPath: true,
+  titleBarCompat: false,
+  titleBarStripPx: 40,
+  htmlViewerNoSandbox: false,
+  htmlViewerDefaultUnsafe: false,
+  browserNoSandbox: false,
+  browserInterceptLinks: true,
+  browserInterceptHttp: true,
+  browserInterceptHttps: false,
+  tabsEnabled: {},
+  viewersEnabled: {},
+}
+
+const SIDE_CARD_TABS = [
+  { id: 'explorer', title: '资源管理器', desc: '浏览工作区文件' },
+  { id: 'git', title: '源代码管理', desc: '查看与暂存变更' },
+  { id: 'subagent', title: '任务管理', desc: '子代理与后台任务' },
+  { id: 'terminal', title: '终端', desc: '会话内终端' },
+  { id: 'browser', title: '浏览器', desc: '侧栏内嵌网页' },
+  { id: 'editor', title: '编辑器', desc: '打开文件（通常隐藏）' },
+  { id: 'diff', title: '差异', desc: '查看文件差异（通常隐藏）' },
+]
+
+const SIDE_CARD_VIEWERS = [
+  { id: 'image', title: '图片', desc: 'png / jpg / webp…' },
+  { id: 'pdf', title: 'PDF', desc: '.pdf' },
+  { id: 'markdown', title: 'Markdown', desc: '.md' },
+  { id: 'html', title: 'HTML', desc: '.html' },
+  { id: 'code', title: '代码', desc: '兜底：任意文本' },
+  { id: 'binary-download', title: '二进制下载', desc: '无法预览时下载' },
+]
+
+const sideCardState = {
+  prefs: { ...SIDE_CARD_DEFAULTS },
+  revision: null,
+  busy: false,
+}
+
+function setSideCardStatus(kind, text) {
+  const box = $('side-card-status')
+  if (!box) return
+  box.className = kind ? `update-status update-status--${kind}` : 'update-status'
+  box.textContent = text || ''
+}
+
+function enabledMap(map, id) {
+  return map?.[id] !== false
+}
+
+function renderSideCardInventory(boxId, items, map, kind) {
+  const box = $(boxId)
+  box.replaceChildren()
+  for (const item of items) {
+    const on = enabledMap(map, item.id)
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = `side-card-chip${on ? ' is-on' : ''}`
+    button.innerHTML = '<strong></strong><small></small>'
+    button.querySelector('strong').textContent = item.title
+    button.querySelector('small').textContent = item.desc
+    button.addEventListener('click', () => {
+      const next = { ...(sideCardState.prefs[kind] ?? {}) }
+      next[item.id] = !enabledMap(next, item.id)
+      void commitSideCard({ [kind]: next })
+    })
+    box.appendChild(button)
+  }
+}
+
+function renderSideCard() {
+  const prefs = sideCardState.prefs
+  for (const input of document.querySelectorAll('[data-side-pref]')) {
+    const key = input.dataset.sidePref
+    input.checked = prefs[key] === true
+  }
+  $('side-card-width').value = String(prefs.defaultWidthPercent ?? 30)
+  $('side-card-strip').value = String(prefs.titleBarStripPx ?? 40)
+  $('side-card-strip-row').hidden = prefs.titleBarCompat !== true
+  renderSideCardInventory('side-card-tabs', SIDE_CARD_TABS, prefs.tabsEnabled, 'tabsEnabled')
+  renderSideCardInventory('side-card-viewers', SIDE_CARD_VIEWERS, prefs.viewersEnabled, 'viewersEnabled')
+}
+
+function parseSideCardPrefs(value) {
+  if (value === null || typeof value !== 'object') return { ...SIDE_CARD_DEFAULTS }
+  return {
+    ...SIDE_CARD_DEFAULTS,
+    ...value,
+    tabsEnabled: value.tabsEnabled && typeof value.tabsEnabled === 'object' ? value.tabsEnabled : {},
+    viewersEnabled: value.viewersEnabled && typeof value.viewersEnabled === 'object' ? value.viewersEnabled : {},
+  }
+}
+
+async function refreshSideCard() {
+  setSideCardStatus('checking', '正在读取侧边卡片设置…')
+  try {
+    const view = await api.sidebarPrefsGet()
+    sideCardState.revision = view?.revision ?? null
+    sideCardState.prefs = parseSideCardPrefs(view?.value)
+    renderSideCard()
+    setSideCardStatus('ok', '已加载当前设置。改动会立刻写入。')
+  } catch (error) {
+    sideCardState.prefs = { ...SIDE_CARD_DEFAULTS }
+    renderSideCard()
+    setSideCardStatus('warn', `读不到设置服务，先显示默认值：${error.message ?? String(error)}`)
+  }
+}
+
+async function commitSideCard(patch) {
+  if (sideCardState.busy) return
+  sideCardState.busy = true
+  const previous = sideCardState.prefs
+  sideCardState.prefs = parseSideCardPrefs({ ...previous, ...patch })
+  renderSideCard()
+  try {
+    const view = await api.sidebarPrefsUpdate(patch, sideCardState.revision ?? undefined)
+    sideCardState.revision = view?.revision ?? sideCardState.revision
+    sideCardState.prefs = parseSideCardPrefs(view?.value ?? sideCardState.prefs)
+    renderSideCard()
+    setSideCardStatus('ok', '已保存。新会话会用这套设置；当前会话请刷新或新建后查看。')
+  } catch (error) {
+    sideCardState.prefs = previous
+    renderSideCard()
+    setSideCardStatus('error', `保存失败：${error.message ?? String(error)}`)
+  } finally {
+    sideCardState.busy = false
+  }
+}
+
+function wireSideCardPanel() {
+  $('side-card-refresh').addEventListener('click', () => { void refreshSideCard() })
+  for (const input of document.querySelectorAll('[data-side-pref]')) {
+    input.addEventListener('change', () => {
+      void commitSideCard({ [input.dataset.sidePref]: input.checked })
+    })
+  }
+  $('side-card-width').addEventListener('change', () => {
+    const parsed = Number($('side-card-width').value)
+    if (!Number.isFinite(parsed)) return
+    const clamped = Math.min(60, Math.max(20, Math.round(parsed)))
+    void commitSideCard({ defaultWidthPercent: clamped })
+  })
+  $('side-card-strip').addEventListener('change', () => {
+    const parsed = Number($('side-card-strip').value)
+    if (!Number.isFinite(parsed)) return
+    const clamped = Math.min(120, Math.max(0, Math.round(parsed)))
+    void commitSideCard({ titleBarStripPx: clamped })
   })
 }
 
@@ -1182,7 +1341,7 @@ function wire() {
   wireArchivePanel()
   wireRemotePanel()
   wirePluginPanel()
-  wireUninstallPanel()
+  wireSideCardPanel()
   $('refresh-scan').addEventListener('click', refreshAll)
   $('choose-sessions-dir').addEventListener('click', async () => {
     const config = await api.chooseSessionsRoot()

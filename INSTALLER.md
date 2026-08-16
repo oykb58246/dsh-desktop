@@ -77,9 +77,11 @@ pnpm dist:win
   容量提示「本次安装约需 X · 目标盘剩余 Y」（`GetDiskFreeSpaceExW`）、安装按钮（590,386,130,44）。
 - **单实例**：`CreateMutexW`（`Local\` 会话级）防重复打开；第二个实例激活已有窗口后退出。
   提权交接（`--dir`）实例会短暂重试互斥量，原实例在 `relaunchElevated` 前 `releaseSingleInstance`。
-- **自更新 worker**（`--installer-worker <目录> [--relaunch]`，由更新器以提权拉起）：**不是
-  静默更新**——复用同一进度页（标题「正在更新」），完成后若带 `--relaunch` 经 explorer 以
-  普通令牌启动新版并自动关窗；失败显示错误页并写 `C:\dsh-desktop-install.log`。
+- **更新 = 重新安装**：内置更新器只负责「下载安装包 + 启动安装器」。下载完成后以普通令牌
+  直接打开安装包 exe（等同双击），用户走与首次安装完全相同的三步流程：选目录（默认取
+  `C:\dsh-desktop.ini` 的上次安装目录）→ 点「安装」（此时才提权）→ 完成页勾选启动。
+  安装前进程检测会询问是否结束正在运行的 DSH Desktop，因此更新时应用无需先退出；
+  **不存在任何静默覆盖通道**（`--installer-worker` 自更新模式已移除）。
 - **增量覆盖**：payload manifest 带每文件 `sha256`。更新时若目标文件已存在且哈希一致则跳过写入，
   只覆盖有改动的部分（首次安装仍会写出全部文件）。
 - **安装前进程检测**：点「安装」后（提权副本内）用 PowerShell CIM 枚举目标目录下运行的
@@ -131,11 +133,14 @@ pnpm dist:win
    （`warmQueue`/`warmWorker`），把杀软扫描与系统缓存预热分摊到安装过程中；复制结束
    后在「正在初始化应用…」阶段排空队列。首次启动因此省掉冷读 + 实时扫描的大头开销。
 1. 写 `C:\dsh-desktop.ini`（`InstallPath=...`），作为下次默认目录。
-2. 注册表卸载项 `HKLM\...\Uninstall\2964e23e-3f18-500c-b3e7-68e9fa24df7a`。
-3. 桌面 + 开始菜单快捷方式（`powershell` + `WScript.Shell`）。
+2. 注册表卸载项 `HKLM\...\Uninstall\2964e23e-3f18-500c-b3e7-68e9fa24df7a`，
+   `UninstallString` 指向安装目录里的 `Uninstall.exe`（`uninstaller/main.go`，
+   由 `append-payload.mjs` 编进 shell 段）。
+3. 桌面 + 开始菜单快捷方式（`powershell` + `WScript.Shell`）；开始菜单另有
+   「卸载 DSH Desktop」指向同一份 `Uninstall.exe`。
 4. **Defender 排除**（`defenderExclude`，best-effort）：`Add-MpPreference -ExclusionPath`
    把安装目录加入 Windows Defender 排除列表，首启及后续启动跳过实时扫描；卸载时由
-   `electron/main.mjs` 的 `runUninstallWorker` 用 `Remove-MpPreference` 移除。
+   `Uninstall.exe` 用 `Remove-MpPreference` 移除。
 
 ## 九、历史残留（勿再使用）
 

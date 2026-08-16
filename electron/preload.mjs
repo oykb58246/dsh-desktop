@@ -40,6 +40,12 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   pluginRemove(name) {
     return ipcRenderer.invoke('plugin:remove', name)
   },
+  sidebarPrefsGet() {
+    return ipcRenderer.invoke('sidebar-prefs:get')
+  },
+  sidebarPrefsUpdate(patch, expectedRevision) {
+    return ipcRenderer.invoke('sidebar-prefs:update', patch, expectedRevision)
+  },
   wsList() { return ipcRenderer.invoke('ws:list') },
   wsTree(payload) { return ipcRenderer.invoke('ws:tree', payload) },
   wsRead(payload) { return ipcRenderer.invoke('ws:read', payload) },

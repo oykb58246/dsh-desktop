@@ -11,9 +11,11 @@
  *      publish releases without committing the download folder.
  *
  * Update mechanics: download `dsh-desktop-setup-x64.exe`, verify its sha512
- * against the manifest, then run it elevated with
- * `--installer-worker <install-dir> --relaunch`. The new build overlays the
- * current install (reusing the installer worker) and relaunches the app.
+ * against the manifest, then launch it with the user's normal token — exactly
+ * like opening the installer manually. The user walks the standard three-step
+ * install flow (choose directory → install → launch); the installer itself
+ * asks whether to close a running DSH Desktop when the target directory is in
+ * use, so the app never quits or overlays itself in the background.
  *
  * For local testing the manifest URL can be overridden with the
  * `DSH_DESKTOP_UPDATE_MANIFEST` env var (a full latest.yml URL; the download
@@ -346,9 +348,12 @@ export function cancelDownload() {
 }
 
 /**
- * Overlay the downloaded build onto the current install and relaunch. Runs
- * the new exe elevated with `--installer-worker <install-dir> --relaunch`
- * (handled by main.mjs); the current app quits immediately after spawning.
+ * Launch the downloaded installer for the user — no overlay, no auto-relaunch,
+ * no forced quit. The user walks the exact same flow as a fresh install:
+ * choose the directory (prefilled from the previous install), click 安装
+ * (only then does the installer elevate), and optionally launch the app on
+ * the completion page. If the target directory is in use, the installer's
+ * process detection asks to close the running DSH Desktop.
  */
 export async function applyUpdate() {
   const downloaded = state.downloaded
@@ -358,20 +363,16 @@ export async function applyUpdate() {
   if (downloaded.sha512Ok === false) {
     throw new Error('更新包未通过校验，请重新下载')
   }
-  if (options?.installed?.() !== true) {
-    throw new Error('开发模式无法自动更新，请使用安装版')
-  }
-  const targetDir = options?.installDir?.()
-  if (typeof targetDir !== 'string' || targetDir === '') {
-    throw new Error('未检测到安装目录')
-  }
-  const exe = downloaded.path
-  const workerArgs = `--installer-worker "${targetDir.replace(/"/g, '""')}" --relaunch`
-  spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    `Start-Process -FilePath '${exe.replace(/'/g, "''")}' -ArgumentList '${workerArgs.replace(/'/g, "''")}' -Verb RunAs`],
-  { stdio: 'ignore', windowsHide: true }).unref()
-  // Let the invoke reply flush before the app tears itself down.
-  setImmediate(() => options?.requestQuit?.())
+  // Start non-elevated with the user's token, like a double-click on the
+  // installer; the installer elevates itself when 安装 is clicked.
+  await new Promise((resolve, reject) => {
+    const child = spawn(downloaded.path, [], { detached: true, stdio: 'ignore', windowsHide: true })
+    child.once('error', reject)
+    child.once('spawn', () => {
+      child.unref()
+      resolve()
+    })
+  })
   return { ok: true }
 }
 

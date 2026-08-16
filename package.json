@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Electron desktop shell for DeepSeek Harness.",
   "main": "electron/main.mjs",
@@ -30,7 +30,8 @@
     "asar": true,
     "asarUnpack": [
       "electron/vendor/**",
-      "electron/plugins/**"
+      "electron/plugins/**",
+      "electron/agent-presets/**"
     ],
     "icon": "assets/icon.ico",
     "directories": {

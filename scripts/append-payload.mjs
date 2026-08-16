@@ -61,12 +61,7 @@ execFileSync('go', ['build', '-ldflags', '-s -w -H windowsgui', '-o', uninstallE
   cwd: path.join(root, 'uninstaller'),
   stdio: 'inherit',
 })
-execFileSync(rcedit, [
-  uninstallExe,
-  '--set-icon', path.join(root, 'assets', 'icon.ico'),
-  '--set-version-string', 'FileDescription', '卸载 DSH Desktop',
-  '--set-version-string', 'ProductName', 'DSH Desktop',
-], { stdio: 'ignore' })
+execFileSync(rcedit, [uninstallExe, '--set-icon', path.join(root, 'assets', 'icon.ico')], { stdio: 'ignore' })
 
 async function collect(dir) {
   const files = []

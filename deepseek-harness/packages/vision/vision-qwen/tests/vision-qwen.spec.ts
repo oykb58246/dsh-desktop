@@ -110,7 +110,7 @@ function noteText(messages: readonly { content: readonly { type: string; text?: 
   const message = messages[0]
   expect(message).toBeDefined()
   const block = message?.content.find(entry => entry.type === 'text')
-  return block?.type === 'text' ? block.text : ''
+  return block?.type === 'text' ? (block.text ?? '') : ''
 }
 
 describe('vision-qwen bridge', () => {

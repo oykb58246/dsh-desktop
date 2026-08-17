@@ -1,13 +1,13 @@
-version: 0.1.5
+version: 0.1.6
 files:
-  - url: https://github.com/oykb58246/dsh-desktop/releases/download/v0.1.5/dsh-desktop-setup-x64.exe
-    sha512: 3QCgU8zGDCSJ1285Mv5wiJ2rCsLRV9Q27pqs+0J44T2v+UKt4aiQfJxki4bbJKxlPHQ6xlfIc6ZNzcXIjUFSFg==
-    size: 537012335
+  - url: https://github.com/oykb58246/dsh-desktop/releases/download/v0.1.6/dsh-desktop-setup-x64.exe
+    sha512: GLrKMw2/cp+RthPPtVRrJy4OksuG5dxSosnsJFnqjN2bYVUgG1uA5z5QCCUJ6Y8FyBA4A8Sja+tOS/SiS65mLg==
+    size: 537015479
 path: dsh-desktop-setup-x64.exe
-sha512: 3QCgU8zGDCSJ1285Mv5wiJ2rCsLRV9Q27pqs+0J44T2v+UKt4aiQfJxki4bbJKxlPHQ6xlfIc6ZNzcXIjUFSFg==
-releaseDate: '2026-08-17T11:23:23.405Z'
+sha512: GLrKMw2/cp+RthPPtVRrJy4OksuG5dxSosnsJFnqjN2bYVUgG1uA5z5QCCUJ6Y8FyBA4A8Sja+tOS/SiS65mLg==
+releaseDate: '2026-08-17T12:02:24.273Z'
 patches:
-  - from: 0.1.4
-    url: https://github.com/oykb58246/dsh-desktop/releases/download/v0.1.5/dsh-desktop-patch-0.1.4-0.1.5-x64.exe
-    sha512: DIwBk8wimR2EGqWcJBLfzDeqmU6zmJgYHcPi+/8Ml/naoOFJDf5PiTBPP/v+e1E9Tb0mhiYx5OjrkQt0W51ZTw==
-    size: 218022101
+  - from: 0.1.5
+    url: https://github.com/oykb58246/dsh-desktop/releases/download/v0.1.6/dsh-desktop-patch-0.1.5-0.1.6-x64.exe
+    sha512: zQ5ZEMAM4q93wePCQhkSbMctpTQXS1RO4um8A+sHe6l6OAsbSs4DJHqgxmyVfPPUg3rCt2n7OxSM8IRMcVm89g==
+    size: 213267478

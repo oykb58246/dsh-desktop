@@ -1,8 +1,15 @@
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { cp, open, readdir, readFile, stat, rm } from 'node:fs/promises'
+import { cp, open, readdir, readFile, stat, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import {
+  buildFileIndex,
+  diffFileIndex,
+  loadPreviousIndex,
+  writeFileIndex,
+  PATCH_META_PATH,
+} from './file-index.mjs'
 
 // Assemble the final installer exe:
 //
@@ -86,42 +93,88 @@ const shellFiles = (await collect(shellRoot)).sort((a, b) => a.size - b.size)
 const runtimeFiles = (await collect(runtimeRoot)).sort((a, b) => a.size - b.size)
 const loader = await readFile(loaderExe)
 
-const shellManifest = { files: [] }
-let offset = loader.length
-for (const file of shellFiles) {
-  shellManifest.files.push({ path: file.path, offset, size: file.size, sha256: file.sha256 })
-  offset += file.size
-}
-const shellManifestBuf = Buffer.from(JSON.stringify(shellManifest))
-const shellEnd = offset + shellManifestBuf.length + 4 + 8
+async function assembleInstaller(outPath, selectedShell, selectedRuntime, runtimeExtra = {}) {
+  const shellManifest = { files: [] }
+  let offset = loader.length
+  for (const file of selectedShell) {
+    shellManifest.files.push({ path: file.path, offset, size: file.size, sha256: file.sha256 })
+    offset += file.size
+  }
+  const shellManifestBuf = Buffer.from(JSON.stringify(shellManifest))
+  const shellEnd = offset + shellManifestBuf.length + 4 + 8
 
-const runtimeManifest = { shellManifestLen: shellManifestBuf.length, files: [] }
-offset = shellEnd
-for (const file of runtimeFiles) {
-  runtimeManifest.files.push({ path: file.path, offset, size: file.size, sha256: file.sha256 })
-  offset += file.size
-}
-const runtimeManifestBuf = Buffer.from(JSON.stringify(runtimeManifest))
+  const runtimeManifest = { ...runtimeExtra, shellManifestLen: shellManifestBuf.length, files: [] }
+  offset = shellEnd
+  for (const file of selectedRuntime) {
+    runtimeManifest.files.push({ path: file.path, offset, size: file.size, sha256: file.sha256 })
+    offset += file.size
+  }
+  const runtimeManifestBuf = Buffer.from(JSON.stringify(runtimeManifest))
 
-const shellLen = Buffer.alloc(4)
-shellLen.writeUInt32LE(shellManifestBuf.length, 0)
-const runtimeLen = Buffer.alloc(4)
-runtimeLen.writeUInt32LE(runtimeManifestBuf.length, 0)
+  const shellLen = Buffer.alloc(4)
+  shellLen.writeUInt32LE(shellManifestBuf.length, 0)
+  const runtimeLen = Buffer.alloc(4)
+  runtimeLen.writeUInt32LE(runtimeManifestBuf.length, 0)
+
+  const handle = await open(outPath, 'w')
+  try {
+    await handle.writeFile(loader)
+    for (const file of selectedShell) await handle.writeFile(await readFile(file.full))
+    await handle.writeFile(shellManifestBuf)
+    await handle.writeFile(shellLen)
+    await handle.writeFile(Buffer.from(MAGIC_SHELL, 'utf8'))
+    for (const file of selectedRuntime) await handle.writeFile(await readFile(file.full))
+    await handle.writeFile(runtimeManifestBuf)
+    await handle.writeFile(runtimeLen)
+    await handle.writeFile(Buffer.from(MAGIC_RUNTIME, 'utf8'))
+  } finally {
+    await handle.close()
+  }
+}
+
+const previousIndex = await loadPreviousIndex(appVersion)
+const currentIndex = buildFileIndex(appVersion, shellFiles, runtimeFiles)
+await writeFileIndex(currentIndex)
+console.log(`Wrote file-index.json for v${appVersion} (shell ${shellFiles.length} + runtime ${runtimeFiles.length})`)
 
 console.log(`assembling ${finalExe} (loader ${loader.length} + shell ${shellFiles.length} files + runtime ${runtimeFiles.length} files)`)
-const handle = await open(finalExe, 'w')
-try {
-  await handle.writeFile(loader)
-  for (const file of shellFiles) await handle.writeFile(await readFile(file.full))
-  await handle.writeFile(shellManifestBuf)
-  await handle.writeFile(shellLen)
-  await handle.writeFile(Buffer.from(MAGIC_SHELL, 'utf8'))
-  for (const file of runtimeFiles) await handle.writeFile(await readFile(file.full))
-  await handle.writeFile(runtimeManifestBuf)
-  await handle.writeFile(runtimeLen)
-  await handle.writeFile(Buffer.from(MAGIC_RUNTIME, 'utf8'))
-} finally {
-  await handle.close()
-}
-await rm(loaderExe, { force: true })
+await assembleInstaller(finalExe, shellFiles, runtimeFiles)
 console.log(`Wrote ${finalExe}`)
+
+const byPath = (files) => new Map(files.map((file) => [file.path, file]))
+if (previousIndex !== null) {
+  const diff = diffFileIndex(previousIndex, currentIndex)
+  const shellMap = byPath(shellFiles)
+  const runtimeMap = byPath(runtimeFiles)
+  const patchShell = diff.shellChanged.map((rel) => shellMap.get(rel)).filter(Boolean)
+  const patchRuntime = diff.runtimeChanged.map((rel) => runtimeMap.get(rel)).filter(Boolean)
+  const changed = patchShell.length + patchRuntime.length
+  const removed = diff.removeShell.length + diff.removeRuntime.length
+  if (changed === 0 && removed === 0) {
+    await rm(PATCH_META_PATH, { force: true })
+    console.log(`No file changes vs v${previousIndex.version}; skip patch installer`)
+  } else {
+    const patchName = `dsh-desktop-patch-${previousIndex.version}-${appVersion}-x64.exe`
+    const patchExe = path.join(root, 'website', 'download', patchName)
+    console.log(`assembling ${patchName} (${changed} changed + ${removed} removed vs v${previousIndex.version})`)
+    await assembleInstaller(patchExe, patchShell, patchRuntime, {
+      kind: 'patch',
+      fromVersion: previousIndex.version,
+      toVersion: appVersion,
+      removeShell: diff.removeShell,
+      removeRuntime: diff.removeRuntime,
+    })
+    await writeFile(PATCH_META_PATH, JSON.stringify({
+      from: previousIndex.version,
+      to: appVersion,
+      file: patchName,
+    }, null, 2), 'utf8')
+    const patchSize = (await stat(patchExe)).size
+    console.log(`Wrote ${patchExe} (${patchSize} bytes)`)
+  }
+} else {
+  await rm(PATCH_META_PATH, { force: true })
+  console.log('No previous file-index; this build is a full installer only. The next version can ship an incremental patch.')
+}
+
+await rm(loaderExe, { force: true })

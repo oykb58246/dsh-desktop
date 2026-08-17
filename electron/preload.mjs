@@ -112,8 +112,8 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   updateCheck() {
     return ipcRenderer.invoke('update:check')
   },
-  updateDownload() {
-    return ipcRenderer.invoke('update:download')
+  updateDownload(mode) {
+    return ipcRenderer.invoke('update:download', mode)
   },
   updateCancel() {
     return ipcRenderer.invoke('update:cancel')

@@ -2,12 +2,13 @@
  * Serialize harness messages into DeepSeek chat completions. User text is joined; assistant text
  * becomes `content`, tool calls become `tool_calls`, and tool results become separate tool messages.
  * Assistant reasoning is replayed as `reasoning_content` only on tool-call turns, as required by
- * thinking-mode passback. Core image blocks are rejected explicitly because this wire route is text-only;
+ * thinking-mode passback. Leftover image blocks flatten to a named attachment
+ * stub so a text-only route never crashes when history still carries pixels;
  * unknown declaration-merged block types retain the adapter's documented extension fallback.
  * @module dsh-llm-deepseek/serialize
  */
 
-import { contentHasImage, LlmError } from '@deepseek-ai/dsh-llm'
+import { LlmError } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
 import type { WireMessage, WireRequest, WireTool } from './types.ts'
 
@@ -55,16 +56,14 @@ function resolveThinking(options: GenerateOptions, defaults: RequestDefaults): R
 /** Join the text blocks of a message (used for user/tool-result content). */
 function flattenText(blocks: ContentBlock[]): string {
   return blocks
-    .filter(block => block.type === 'text')
-    .map(block => block.text)
+    .flatMap(block => {
+      if (block.type === 'text') return [block.text]
+      if (block.type === 'image') {
+        return [`【图片附件 ${String(block.attachment.attachmentId)}】`]
+      }
+      return []
+    })
     .join('')
-}
-
-/** Reject core image content before any text-flattening path can silently erase it. */
-function assertTextOnly(blocks: readonly ContentBlock[]): void {
-  if (contentHasImage(blocks)) {
-    throw new LlmError('The DeepSeek chat-completions adapter does not support image content.', 'UNSUPPORTED_CONTENT')
-  }
 }
 
 /** Serialize one assistant message (text + reasoning + tool calls). */
@@ -112,7 +111,6 @@ function serializeAssistant(message: Message): WireMessage {
 export function serializeMessages(messages: Message[]): WireMessage[] {
   const wire: WireMessage[] = []
   for (const message of messages) {
-    assertTextOnly(message.content)
     if (message.role === 'system') {
       wire.push({ role: 'system', content: flattenText(message.content) })
       continue

@@ -96,19 +96,17 @@ async function mount(config: Config = {}) {
   return { ctx }
 }
 
-/** Fire one agent/pre-step proposal and return the enter decision's messages. */
+/** Fire one agent/request-messages projection and return the wire messages. */
 async function fire(ctx: Context, agent: Agent) {
   const proposed = imageMessage()
-  const decision = await agentEvents(ctx, agent).waterfall(
-    'agent/pre-step',
+  return agentEvents(ctx, agent).waterfall(
+    'agent/request-messages',
     { messages: [proposed], turn: 1, step: 1, signal: SIGNAL },
-    () => Promise.resolve({ kind: 'enter' as const, messages: [proposed] }),
+    () => Promise.resolve([proposed]),
   )
-  if (decision.kind !== 'enter') throw new Error('expected an enter decision')
-  return decision.messages
 }
 
-function noteText(messages: readonly ReturnType<typeof createUserMessage>[]): string {
+function noteText(messages: readonly { content: readonly { type: string; text?: string }[] }[]): string {
   const message = messages[0]
   expect(message).toBeDefined()
   const block = message?.content.find(entry => entry.type === 'text')
@@ -141,7 +139,7 @@ describe('vision-qwen bridge', () => {
     expect(ctx.tools.schemas().some(schema => schema.name === 'vision_chat')).toBe(false)
   })
 
-  it('converts an image block into a durable vision note for a text-only model', async () => {
+  it('converts an image block into a request-only vision note for a text-only model', async () => {
     const { ctx } = await mount()
     ctx.llm.registerAdapter([PROVIDER], new TextAdapter())
     const session = Session.create(SessionId('s'))
@@ -159,6 +157,33 @@ describe('vision-qwen bridge', () => {
     const session = Session.create(SessionId('s'))
     const messages = await fire(ctx, sessionAgent(session, 'see'))
     expect(messages[0]?.content.some(block => block.type === 'image')).toBe(true)
+  })
+
+  it('drops earlier images on an image-capable model and keeps only the latest user image', async () => {
+    const { ctx } = await mount()
+    ctx.llm.registerAdapter([PROVIDER], new VisionAdapter())
+    const older = imageMessage()
+    const newerId = AttachmentId(`sha256:${'b'.repeat(64)}`)
+    const newer = createUserMessage({
+      content: [{
+        type: 'image',
+        attachment: {
+          attachmentId: newerId,
+          mediaType: 'image/png',
+          bytes: 3,
+          width: 1,
+          height: 1,
+        },
+      }],
+      source: { kind: 'user' },
+    })
+    const out = await agentEvents(ctx, sessionAgent(Session.create(SessionId('s')), 'see')).waterfall(
+      'agent/request-messages',
+      { messages: [older, newer], turn: 2, step: 1, signal: SIGNAL },
+      () => Promise.resolve([older, newer]),
+    )
+    expect(out[0]?.content.some(block => block.type === 'image')).toBe(false)
+    expect(out[1]?.content.some(block => block.type === 'image')).toBe(true)
   })
 
   it('degrades to a note naming the failure when the vision call fails', async () => {

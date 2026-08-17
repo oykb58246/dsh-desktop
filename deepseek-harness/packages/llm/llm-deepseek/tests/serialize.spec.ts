@@ -133,17 +133,19 @@ describe('serializeMessages', () => {
     expect(wire).toEqual([{ role: 'user', content: 'see chart' }])
   })
 
-  it('rejects image blocks instead of silently flattening them away', () => {
-    expect(() => serializeMessages([createUserMessage({
+  it('flattens leftover image blocks to a named attachment stub', () => {
+    const id = AttachmentId(`sha256:${'a'.repeat(64)}`)
+    const wire = serializeMessages([createUserMessage({
       content: [{
         type: 'image',
         attachment: {
-          attachmentId: AttachmentId(`sha256:${'a'.repeat(64)}`),
+          attachmentId: id,
           mediaType: 'image/png', bytes: 68, width: 1, height: 1,
         },
       }],
       source: { kind: 'plugin', plugin: 'test' },
-    })])).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_CONTENT' }))
+    })])
+    expect(wire).toEqual([{ role: 'user', content: `【图片附件 ${String(id)}】` }])
   })
 
   it('emits an empty user message rather than dropping block-less messages', () => {

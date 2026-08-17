@@ -50,7 +50,7 @@
         <button class="tool-rail__item" data-tool="plugin-market">
           <span class="tool-rail__icon" aria-hidden="true">⌘</span>
           <span class="tool-rail__copy">
-            <strong>插件市场</strong>
+            <strong>插件中心</strong>
             <small>GitHub dsh-plugin 生态</small>
           </span>
         </button>
@@ -271,42 +271,56 @@
         </div>
       </main>
 
-      <main class="tool-stage" id="plugin-market" hidden>
+      <main class="tool-stage tool-stage--plugins" id="plugin-market" hidden>
         <div class="stage-heading">
           <div>
             <p class="eyebrow">DSH PLUGIN ECOSYSTEM</p>
-            <h1>插件市场</h1>
+            <h1>插件中心</h1>
           </div>
           <div class="stage-heading__actions">
             <button class="button button--secondary" id="plugin-refresh" type="button">↻ 刷新</button>
           </div>
         </div>
-        <p class="plugin-intro">浏览 GitHub <code>dsh-plugin</code> 主题并安装到本机 web profile。打包后的桌面端会直接从 GitHub 拉仓库安装，不依赖本机 pnpm。安装后请重启主窗口。</p>
-        <div class="config-strip">
-          <div class="config-item">
-            <span class="config-item__label">搜索插件</span>
-            <input class="tools-input" id="plugin-search" type="search" spellcheck="false" placeholder="按名称或关键词搜索 dsh-plugin…" />
-            <button class="button button--secondary button--mini" id="plugin-search-btn" type="button">搜索</button>
-          </div>
-          <div class="config-item">
-            <span class="config-item__label">直接安装</span>
-            <input class="tools-input" id="plugin-spec" type="text" spellcheck="false" placeholder="github:owner/repo 或 https://github.com/owner/repo" />
-            <button class="button button--primary button--mini" id="plugin-spec-btn" type="button">安装</button>
+        <div class="plugin-hero">
+          <p class="plugin-hero__copy">浏览 GitHub <code>dsh-plugin</code> 主题，一键安装到本机 web profile。打包版直接从仓库拉取，不依赖本机 pnpm。</p>
+          <div class="plugin-hero__chips">
+            <span>GitHub 主题</span>
+            <span>无需 pnpm</span>
+            <span>重启后生效</span>
           </div>
         </div>
-        <div class="plugin-section">
-          <p class="section-label">已安装（web profile）</p>
-          <div class="plugin-list" id="plugin-installed">
-            <div class="empty-note">加载中…</div>
+        <div class="plugin-toolbar">
+          <label class="search-box plugin-toolbar__search">
+            <span aria-hidden="true">⌕</span>
+            <input id="plugin-search" type="search" spellcheck="false" placeholder="搜索名称、仓库或关键词…" />
+          </label>
+          <button class="button button--secondary" id="plugin-search-btn" type="button">搜索</button>
+          <div class="plugin-toolbar__install">
+            <input class="tools-input" id="plugin-spec" type="text" spellcheck="false" placeholder="github:owner/repo 或仓库地址" />
+            <button class="button button--primary" id="plugin-spec-btn" type="button">安装</button>
           </div>
         </div>
-        <div class="plugin-section">
-          <p class="section-label">精选 / 社区</p>
-          <div class="plugin-list" id="plugin-catalog">
-            <div class="empty-note">正在读取 GitHub dsh-plugin 主题…</div>
-          </div>
+        <div class="plugin-scroll" tabindex="0">
+          <section class="plugin-section">
+            <div class="plugin-section__head">
+              <p class="section-label">已安装</p>
+              <span class="plugin-section__meta" id="plugin-installed-count">web profile</span>
+            </div>
+            <div class="plugin-list" id="plugin-installed">
+              <div class="empty-note">加载中…</div>
+            </div>
+          </section>
+          <section class="plugin-section">
+            <div class="plugin-section__head">
+              <p class="section-label">精选 / 社区</p>
+              <span class="plugin-section__meta" id="plugin-catalog-count">GitHub dsh-plugin</span>
+            </div>
+            <div class="plugin-grid" id="plugin-catalog">
+              <div class="empty-note">正在读取 GitHub dsh-plugin 主题…</div>
+            </div>
+          </section>
         </div>
-        <div class="update-status" id="plugin-status" role="status" aria-live="polite"></div>
+        <div class="update-status plugin-status" id="plugin-status" role="status" aria-live="polite"></div>
       </main>
 
       <main class="tool-stage" id="update-check" hidden>
@@ -349,6 +363,7 @@
 
         <div class="update-actions">
           <button class="button button--primary button--wide" id="update-now" type="button" hidden>立即更新 <span>→</span></button>
+          <button class="button button--secondary" id="update-download-full" type="button" hidden>下载完整安装包</button>
           <button class="button button--primary button--wide" id="update-apply" type="button" hidden>打开安装器安装 <span>→</span></button>
           <button class="button button--secondary" id="update-cancel" type="button" hidden>取消下载</button>
         </div>

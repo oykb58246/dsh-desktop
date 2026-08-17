@@ -18,6 +18,8 @@ output/
 website/download/win-unpacked/
 website/download/*.exe
 website/download/builder-debug.yml
+website/download/patch.json
+website/download/indexes/
 website/build-output/
 website/fast-output/
 cockpit-tools/

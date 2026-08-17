@@ -128,6 +128,140 @@ func TestInstallToPipeline(t *testing.T) {
 	}
 }
 
+func writeContainer(t *testing.T, dest string, loader []byte, shell map[string][]byte, runtime map[string][]byte, rtExtra runtimeManifest) {
+	t.Helper()
+	const magicShell = "DSHSHL01"
+	const magicRuntime = "DSHPLD01"
+
+	type pair struct {
+		path string
+		data []byte
+	}
+	var shellPairs, runtimePairs []pair
+	for p, data := range shell {
+		shellPairs = append(shellPairs, pair{p, data})
+	}
+	for p, data := range runtime {
+		runtimePairs = append(runtimePairs, pair{p, data})
+	}
+
+	offset := int64(len(loader))
+	var shellFiles []fileEntry
+	var shellBlob []byte
+	for _, item := range shellPairs {
+		shellFiles = append(shellFiles, fileEntry{Path: item.path, Offset: offset, Size: int64(len(item.data))})
+		shellBlob = append(shellBlob, item.data...)
+		offset += int64(len(item.data))
+	}
+	shellManJSON, _ := json.Marshal(shellManifest{Files: shellFiles})
+	shellEnd := offset + int64(len(shellManJSON)) + 4 + 8
+
+	offset = shellEnd
+	var runtimeFiles []fileEntry
+	var runtimeBlob []byte
+	for _, item := range runtimePairs {
+		runtimeFiles = append(runtimeFiles, fileEntry{Path: item.path, Offset: offset, Size: int64(len(item.data))})
+		runtimeBlob = append(runtimeBlob, item.data...)
+		offset += int64(len(item.data))
+	}
+	rtExtra.ShellManifestLen = len(shellManJSON)
+	rtExtra.Files = runtimeFiles
+	runtimeManJSON, _ := json.Marshal(rtExtra)
+
+	var buf []byte
+	buf = append(buf, loader...)
+	buf = append(buf, shellBlob...)
+	buf = append(buf, shellManJSON...)
+	len4 := make([]byte, 4)
+	binary.LittleEndian.PutUint32(len4, uint32(len(shellManJSON)))
+	buf = append(buf, len4...)
+	buf = append(buf, magicShell...)
+	buf = append(buf, runtimeBlob...)
+	buf = append(buf, runtimeManJSON...)
+	binary.LittleEndian.PutUint32(len4, uint32(len(runtimeManJSON)))
+	buf = append(buf, len4...)
+	buf = append(buf, magicRuntime...)
+	if err := os.WriteFile(dest, buf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLooksLikeInstallAndSafeJoin(t *testing.T) {
+	dir := t.TempDir()
+	if looksLikeInstall(dir) {
+		t.Fatal("empty dir must not look like an install")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "DSH Desktop.exe"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !looksLikeInstall(dir) {
+		t.Fatal("DSH Desktop.exe should mark an install")
+	}
+	if _, ok := safeJoin(dir, `..\escape.txt`); ok {
+		t.Fatal("parent escape must be rejected")
+	}
+	if _, ok := safeJoin(dir, `sub/ok.txt`); !ok {
+		t.Fatal("relative path must be accepted")
+	}
+}
+
+func TestInstallToPatch(t *testing.T) {
+	if isElevated() {
+		t.Skip("elevated run would really write C:\\dsh-desktop.ini / registry / shortcuts")
+	}
+	old := installerExePath
+	defer func() { installerExePath = old }()
+
+	work := t.TempDir()
+	full := filepath.Join(work, "full.exe")
+	writeContainer(t, full, []byte("FAKELOADERPREFIX0123456789"),
+		map[string][]byte{"keep.txt": []byte("KEEP"), "gone.txt": []byte("GONE")},
+		map[string][]byte{"keep.js": []byte("KEEPJS"), "gone.js": []byte("GONEJS")},
+		runtimeManifest{})
+	installerExePath = full
+	target := filepath.Join(work, "target")
+	if err := installTo(target); err != nil {
+		t.Fatalf("full installTo: %v", err)
+	}
+
+	patch := filepath.Join(work, "patch.exe")
+	writeContainer(t, patch, []byte("FAKELOADERPREFIX0123456789"),
+		map[string][]byte{"keep.txt": []byte("NEWK"), "added.txt": []byte("ADD")},
+		map[string][]byte{"keep.js": []byte("NEWJS"), "added.js": []byte("ADDJS")},
+		runtimeManifest{
+			Kind:          "patch",
+			FromVersion:   "0.1.4",
+			ToVersion:     "0.1.5",
+			RemoveShell:   []string{"gone.txt"},
+			RemoveRuntime: []string{"gone.js"},
+		})
+	installerExePath = patch
+	if err := installTo(target); err != nil {
+		t.Fatalf("patch installTo: %v", err)
+	}
+
+	must := map[string]string{
+		"keep.txt":  "NEWK",
+		"added.txt": "ADD",
+		filepath.Join("resources", "dsh-runtime", "keep.js"):  "NEWJS",
+		filepath.Join("resources", "dsh-runtime", "added.js"): "ADDJS",
+	}
+	for rel, want := range must {
+		got, err := os.ReadFile(filepath.Join(target, rel))
+		if err != nil {
+			t.Fatalf("missing %s: %v", rel, err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s = %q, want %q", rel, got, want)
+		}
+	}
+	for _, rel := range []string{"gone.txt", filepath.Join("resources", "dsh-runtime", "gone.js")} {
+		if _, err := os.Stat(filepath.Join(target, rel)); !os.IsNotExist(err) {
+			t.Fatalf("%s should have been removed, err=%v", rel, err)
+		}
+	}
+}
+
 // TestRunningUnder verifies the running-process scan finds the DSH Desktop
 // processes installed on this machine (the app under D:\Program Files), and
 // that the scan excludes the test process itself.

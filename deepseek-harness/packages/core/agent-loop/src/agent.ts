@@ -483,9 +483,20 @@ export class ReactLoopAgent implements Agent {
     }
     signal.throwIfAborted()
 
+    const derivedMessages = boundaryMessages
+    const projectedMessages = await this.dispatch.waterfall(
+      'agent/request-messages',
+      { turn, step, signal, messages: derivedMessages },
+      () => Promise.resolve(derivedMessages),
+    )
+    signal.throwIfAborted()
+    const requestMessages = projectedMessages === derivedMessages
+      ? derivedMessages
+      : deepFreeze(structuredClone(projectedMessages))
+
     const request = markAgentLoopRequest(deepFreeze({
       ...header.config,
-      messages: boundaryMessages,
+      messages: requestMessages,
       ...header.system !== undefined ? { system: header.system } : {},
       ...header.tools !== undefined ? { tools: header.tools } : {},
       sessionId: this.session.id,

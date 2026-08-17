@@ -473,12 +473,20 @@ function setUpdateProgress(percent, label, detail) {
 function latestMeta(latest) {
   const parts = [latest.sourceLabel]
   if (latest.releaseDate) parts.push(formatDate(latest.releaseDate))
-  if (latest.size) parts.push(formatBytes(latest.size))
+  if (latest.channel === 'patch' && latest.size) {
+    parts.push(`增量 ${formatBytes(latest.size)}`)
+    if (latest.fullSize && latest.fullSize !== latest.size) {
+      parts.push(`完整包 ${formatBytes(latest.fullSize)}`)
+    }
+  } else if (latest.size) {
+    parts.push(formatBytes(latest.size))
+  }
   return parts.join(' · ')
 }
 
 function renderUpdateInfo(info) {
   updateState.info = info
+  $('update-download-full').hidden = true
   $('update-current-version').textContent = `v${info.current}`
   $('update-current-meta').textContent = info.installed
     ? `已安装 · ${info.installDir ?? ''}`
@@ -519,11 +527,15 @@ function renderUpdateInfo(info) {
   } else if (info.updateAvailable !== true) {
     $('update-latest-version').textContent = `v${latest.version}`
     $('update-latest-meta').textContent = latestMeta(latest)
-    setUpdateStatus('ok', `已是最新版本：当前 v${info.current}，与官方基线 v${latest.version} 一致。如需重装当前版本，可点击「强制覆盖更新」。`)
+    setUpdateStatus('ok', `已是最新版本：当前 v${info.current}，与官方基线 v${latest.version} 一致。如需重装当前版本，可点击「强制覆盖更新」（完整安装包）。`)
   } else {
     $('update-latest-version').textContent = `v${latest.version}`
     $('update-latest-meta').textContent = latestMeta(latest)
-    setUpdateStatus('available', `发现新版本 v${latest.version}（当前 v${info.current}）。`)
+    if (latest.channel === 'patch') {
+      setUpdateStatus('available', `发现新版本 v${latest.version}（当前 v${info.current}）。可下载相对 v${latest.patchFrom} 的增量包${latest.size ? ` ${formatBytes(latest.size)}` : ''}，不必再拉完整安装包。`)
+    } else {
+      setUpdateStatus('available', `发现新版本 v${latest.version}（当前 v${info.current}）。当前没有匹配的增量包，将下载完整安装包。`)
+    }
   }
 
   const downloaded = info.downloaded
@@ -534,18 +546,27 @@ function renderUpdateInfo(info) {
     $('update-progress-box').hidden = false
     setUpdateProgress(0, '正在下载官方更新包…', '等待下载进度…')
     $('update-now').hidden = true
+    $('update-download-full').hidden = true
     $('update-apply').hidden = true
     $('update-cancel').hidden = false
   } else if (downloaded?.ready === true) {
     $('update-progress-box').hidden = false
-    setUpdateProgress(100, '更新包已就绪',
+    setUpdateProgress(100, downloaded.channel === 'patch' ? '增量包已就绪' : '更新包已就绪',
       `已下载 ${formatBytes(downloaded.size)}${
+        downloaded.channel === 'patch' ? ' · 增量'
+          : ''}${
         downloaded.sha512Ok === true ? ' · sha512 校验通过'
           : downloaded.sha512Ok === null ? ' · 官方基线未提供 sha512（未校验）' : ''}`)
     $('update-now').hidden = true
+    $('update-download-full').hidden = true
     $('update-apply').hidden = false
+    $('update-apply').innerHTML = downloaded.channel === 'patch'
+      ? '打开增量更新 <span>→</span>'
+      : '打开安装器安装 <span>→</span>'
     $('update-cancel').hidden = true
-    setUpdateStatus('available', '更新包已就绪，点击「打开安装器安装」启动安装程序，按安装流程完成更新。')
+    setUpdateStatus('available', downloaded.channel === 'patch'
+      ? '增量包已就绪。打开后选择已安装目录并点「更新」，只覆盖改动过的文件。'
+      : '更新包已就绪，点击「打开安装器安装」启动安装程序，按安装流程完成更新。')
   } else {
     $('update-progress-box').hidden = true
     $('update-cancel').hidden = true
@@ -554,8 +575,14 @@ function renderUpdateInfo(info) {
     // whenever a baseline exists, relabeled when the version already matches.
     $('update-now').hidden = latest === null || info.downloading === true
     $('update-now').innerHTML = info.updateAvailable === true
-      ? '立即更新 <span>→</span>'
+      ? (latest.channel === 'patch'
+        ? `下载增量更新${latest.size ? `（${formatBytes(latest.size)}）` : ''} <span>→</span>`
+        : '立即更新 <span>→</span>')
       : '强制覆盖更新 <span>→</span>'
+    $('update-download-full').hidden = latest === null
+      || info.downloading === true
+      || info.updateAvailable !== true
+      || latest.channel !== 'patch'
     if (info.downloadError) setUpdateStatus('error', `下载失败：${info.downloadError}`)
   }
 
@@ -580,14 +607,15 @@ async function runUpdateCheck() {
   }
 }
 
-async function startDownload() {
+async function startDownload(mode = 'auto') {
   if (updateState.downloading) return
   updateState.downloading = true
-  setUpdateStatus('checking', '开始下载官方更新包…')
+  setUpdateStatus('checking', mode === 'full' ? '开始下载完整安装包…' : '开始下载官方更新包…')
   $('update-progress-box').hidden = false
-  setUpdateProgress(0, '正在下载…', '')
+  $('update-download-full').hidden = true
+  setUpdateProgress(0, mode === 'full' ? '正在下载完整安装包…' : '正在下载…', '')
   try {
-    const info = await api.updateDownload()
+    const info = await api.updateDownload(mode)
     updateState.downloading = false
     renderUpdateInfo(info)
     if (info.downloadError) showToast(`下载失败：${info.downloadError}`, true)
@@ -611,7 +639,7 @@ async function applyUpdateNow() {
   setUpdateStatus('checking', '正在打开安装程序…')
   try {
     await api.updateApply()
-    setUpdateStatus('ok', '安装程序已打开。请在安装器窗口中选择目录并点击「安装」完成更新，当前应用无需退出。')
+    setUpdateStatus('ok', '安装程序已打开。请在安装器窗口中选择已安装目录并点击「安装」或「更新」完成，当前应用无需退出。')
     $('update-apply').hidden = true
   } catch (error) {
     showToast(`打开安装程序失败：${error.message ?? String(error)}`, true)
@@ -1004,6 +1032,7 @@ function wireRail() {
 function wireUpdatePanel() {
   $('update-check-now').addEventListener('click', () => { void runUpdateCheck() })
   $('update-now').addEventListener('click', () => { void startDownload() })
+  $('update-download-full').addEventListener('click', () => { void startDownload('full') })
   $('update-apply').addEventListener('click', () => { void applyUpdateNow() })
   $('update-cancel').addEventListener('click', () => { void cancelDownload() })
   $('update-open-repo').addEventListener('click', () => { void api.updateOpenRepo() })
@@ -1032,32 +1061,65 @@ const pluginState = {
 
 function setPluginStatus(kind, text) {
   const box = $('plugin-status')
-  box.className = `update-status update-status--${kind}`
+  box.className = `update-status plugin-status update-status--${kind}`
   box.textContent = text
+}
+
+const PLUGIN_KIND_LABELS = {
+  marketplace: '市场',
+  discover: '发现',
+  bridge: '桥接',
+  skills: '技能',
+  guide: '指南',
+  catalog: '目录',
+  community: '社区',
+}
+
+function pluginInitials(name) {
+  const short = String(name ?? '').replace(/^@[^/]+\//, '')
+  const parts = short.split(/[-_./]/).filter(Boolean)
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  return short.slice(0, 2).toUpperCase() || 'P'
+}
+
+function pluginHue(name) {
+  let hash = 0
+  for (const ch of String(name ?? '')) hash = (hash * 33 + ch.charCodeAt(0)) >>> 0
+  return 190 + (hash % 90)
+}
+
+function pluginKindLabel(plugin) {
+  if (plugin.source === 'featured') return '精选'
+  return PLUGIN_KIND_LABELS[plugin.kind] || '插件'
 }
 
 function renderInstalledPlugins(snapshot) {
   const box = $('plugin-installed')
+  const count = $('plugin-installed-count')
   const rows = snapshot?.dependencies ?? []
+  count.textContent = rows.length === 0 ? 'web profile 暂无额外插件' : `web profile · ${rows.length} 个`
   if (rows.length === 0) {
-    box.innerHTML = '<div class="empty-note">web profile 还没有额外插件。可从下方目录安装，或在终端执行 <code>dsh plugin --profile web add github:owner/repo</code>。</div>'
+    box.innerHTML = '<div class="empty-note">还没有额外插件。从下方目录安装，或在「直接安装」里粘贴 <code>github:owner/repo</code>。</div>'
     return
   }
   box.replaceChildren()
   for (const row of rows) {
     const card = document.createElement('div')
-    card.className = 'plugin-card'
+    card.className = 'plugin-card plugin-card--installed is-installed'
+    card.style.setProperty('--plugin-hue', String(pluginHue(row.name)))
     card.innerHTML = `
-      <div class="plugin-card__head">
+      <div class="plugin-card__mark"></div>
+      <div class="plugin-card__title">
         <strong></strong>
-        <span class="badge ${row.bundle ? 'badge--ok' : 'badge--muted'}">${row.bundle ? 'bundle' : '依赖'}</span>
+        <div class="plugin-card__spec"></div>
       </div>
-      <div class="plugin-card__desc"></div>
+      <span class="badge ${row.bundle ? 'badge--ok' : 'badge--muted'}">${row.bundle ? 'bundle' : '依赖'}</span>
       <div class="plugin-card__actions">
         <button class="button button--secondary button--mini" type="button" data-act="remove">卸载</button>
       </div>`
+    card.querySelector('.plugin-card__mark').textContent = pluginInitials(row.name)
     card.querySelector('strong').textContent = row.name
-    card.querySelector('.plugin-card__desc').textContent = row.spec
+    card.querySelector('.plugin-card__spec').textContent = row.spec
     card.querySelector('[data-act="remove"]').addEventListener('click', () => { void uninstallPlugin(row.name) })
     box.appendChild(card)
   }
@@ -1065,20 +1127,30 @@ function renderInstalledPlugins(snapshot) {
 
 function renderPluginCatalog(plugins, installedNames) {
   const box = $('plugin-catalog')
+  const count = $('plugin-catalog-count')
   box.replaceChildren()
   if (!plugins || plugins.length === 0) {
-    box.innerHTML = '<div class="empty-note">没有匹配的插件。GitHub 搜索可能被限流，下方仍保留精选条目。</div>'
+    count.textContent = '没有匹配项'
+    box.innerHTML = '<div class="empty-note">没有匹配的插件。GitHub 搜索可能被限流，刷新后会回退到精选条目。</div>'
     return
   }
+  const featured = plugins.filter((row) => row.source === 'featured').length
+  count.textContent = featured > 0
+    ? `${plugins.length} 个 · 精选 ${featured}`
+    : `${plugins.length} 个`
   for (const plugin of plugins) {
     const installed = installedNames.has(plugin.name) || installedNames.has(plugin.spec)
-    const card = document.createElement('div')
-    card.className = 'plugin-card'
-    const stars = typeof plugin.stars === 'number' ? `★ ${plugin.stars}` : (plugin.source === 'featured' ? '精选' : '')
+    const card = document.createElement('article')
+    card.className = `plugin-card${installed ? ' is-installed' : ''}`
+    card.style.setProperty('--plugin-hue', String(pluginHue(plugin.repo || plugin.name)))
+    const stars = typeof plugin.stars === 'number' ? `★ ${plugin.stars}` : ''
     card.innerHTML = `
       <div class="plugin-card__head">
-        <strong></strong>
-        <span class="badge badge--muted"></span>
+        <div class="plugin-card__mark"></div>
+        <div class="plugin-card__title">
+          <strong></strong>
+          <div class="plugin-card__badges"></div>
+        </div>
       </div>
       <div class="plugin-card__desc"></div>
       <div class="plugin-card__spec"></div>
@@ -1086,12 +1158,29 @@ function renderPluginCatalog(plugins, installedNames) {
         <button class="button button--secondary button--mini" type="button" data-act="open">打开仓库</button>
         <button class="button button--primary button--mini" type="button" data-act="install"></button>
       </div>`
+    card.querySelector('.plugin-card__mark').textContent = pluginInitials(plugin.name || plugin.repo)
     card.querySelector('strong').textContent = plugin.repo || plugin.name
-    card.querySelector('.badge').textContent = stars || plugin.kind || 'plugin'
+    const badges = card.querySelector('.plugin-card__badges')
+    const kind = document.createElement('span')
+    kind.className = plugin.source === 'featured' ? 'badge badge--ok' : 'badge badge--muted'
+    kind.textContent = pluginKindLabel(plugin)
+    badges.appendChild(kind)
+    if (stars) {
+      const star = document.createElement('span')
+      star.className = 'badge badge--muted'
+      star.textContent = stars
+      badges.appendChild(star)
+    }
+    if (installed) {
+      const mark = document.createElement('span')
+      mark.className = 'badge badge--ok'
+      mark.textContent = '已安装'
+      badges.appendChild(mark)
+    }
     card.querySelector('.plugin-card__desc').textContent = plugin.description || '暂无简介'
     card.querySelector('.plugin-card__spec').textContent = plugin.spec
     const installBtn = card.querySelector('[data-act="install"]')
-    installBtn.textContent = installed ? '已安装' : '安装到 web profile'
+    installBtn.textContent = installed ? '已安装' : '安装'
     installBtn.disabled = installed
     card.querySelector('[data-act="open"]').addEventListener('click', () => {
       const url = plugin.url || `https://github.com/${plugin.repo}`

@@ -4,7 +4,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { isAgentLoopRequest, type GenerateOptions } from '@deepseek-ai/dsh-llm'
+import { isAgentLoopRequest, type ContentBlock, type GenerateOptions, type Message } from '@deepseek-ai/dsh-llm'
 import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 import { foldRequestHeader } from '@deepseek-ai/dsh-session'
 
@@ -14,6 +14,31 @@ const PACKAGE_NAME = '@deepseek-ai/dsh-agent-loop'
 export const name = 'agent-loop-invariant'
 /** Service required before the companion can reserve package ownership. */
 export const inject = ['invariants']
+
+/**
+ * True when `request` is the durable derivation with image blocks projected
+ * away (described or stubbed). Message identities and non-image blocks stay
+ * aligned; the wire may carry fewer image blocks than the log.
+ */
+function isImageProjection(durable: readonly Message[], request: readonly Message[]): boolean {
+  if (durable.length !== request.length) return false
+  for (let index = 0; index < durable.length; index++) {
+    const from = durable[index]
+    const to = request[index]
+    if (from === undefined || to === undefined) return false
+    if (from.id !== to.id || from.role !== to.role) return false
+    if (JSON.stringify(from.content) === JSON.stringify(to.content)) continue
+    if (!isImageContentProjection(from.content, to.content)) return false
+  }
+  return true
+}
+
+function isImageContentProjection(from: readonly ContentBlock[], to: readonly ContentBlock[]): boolean {
+  const fromImages = from.filter(block => block.type === 'image').length
+  const toImages = to.filter(block => block.type === 'image').length
+  if (fromImages === 0 || toImages > fromImages) return false
+  return true
+}
 
 /** Install the request-reconstruction contribution into its child registration fiber. */
 const install: InvariantInstaller = Object.assign((ctx: Context, fail: InvariantFailure) => {
@@ -37,7 +62,8 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
       return fail('a loop-built request with no request/header event in its session log')
     }
     const expected = session.deriveMessages()
-    if (JSON.stringify(options.messages) !== JSON.stringify(expected)) {
+    if (JSON.stringify(options.messages) !== JSON.stringify(expected)
+      && !isImageProjection(expected, options.messages)) {
       fail(`llm request for session "${String(session.id)}" diverges from the dispatch-time durable derivation (log-reconstruction desync)`)
     }
 

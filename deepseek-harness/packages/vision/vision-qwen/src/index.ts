@@ -3,8 +3,10 @@
  * capability (https://github.com/QwenLM/Qwen-MM-Plugins, Apache-2.0):
  * images pasted into a conversation are saved through the durable attachment
  * seam and, while the selected model cannot read pixels itself, the
- * `agent/pre-step` seam converts each image block into a stable text
- * description produced by the Qwen-VL model. Text-only models — DeepSeek
+ * `agent/request-messages` seam converts each image block into a stable text
+ * description produced by the Qwen-VL model for the model request only — the
+ * durable user/message keeps the original image so the UI can show it
+ * immediately. Text-only models — DeepSeek
  * V4 Flash and Pro among them — therefore read what the user attached, and a
  * companion `vision_chat` tool lets them ask follow-up questions about one
  * named attachment. A `screenshot` tool additionally lets the model capture
@@ -24,11 +26,11 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { contentHasImage, LlmError } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, LlmRuntime, UserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, LlmRuntime, Message } from '@deepseek-ai/dsh-llm'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
@@ -262,6 +264,8 @@ export function apply(ctx: Context, config: Config): void {
   // Runtime-only attachment recall for `vision_chat`: a rewritten message no
   // longer carries its image block, so the tool re-reads the bytes from here.
   const recentRefs = new Map<string, ImageAttachmentRef>()
+  /** Full 【图片附件 …】 notes, reused when the same image is projected again. */
+  const descriptionCache = new Map<string, string>()
 
   const remember = (ref: ImageAttachmentRef): void => {
     recentRefs.set(String(ref.attachmentId), ref)
@@ -322,9 +326,12 @@ export function apply(ctx: Context, config: Config): void {
     }
   }
 
-  /** Convert one image block into the durable description note. */
+  /** Convert one image block into the request-only description note. */
   async function translateBlock(block: Extract<ContentBlock, { type: 'image' }>, signal: AbortSignal): Promise<string> {
     const ref = block.attachment
+    const id = String(ref.attachmentId)
+    const cached = descriptionCache.get(id)
+    if (cached !== undefined) return cached
     remember(ref)
     try {
       const store = attachments()
@@ -336,33 +343,78 @@ export function apply(ctx: Context, config: Config): void {
       const description = await askVision(
         resolved(), key, stored.ref.mediaType, stored.data, resolved().describePrompt, signal,
       )
-      return renderImageNote(ref, description, false)
+      const note = renderImageNote(ref, description, false)
+      descriptionCache.set(id, note)
+      return note
     } catch (error: unknown) {
-      return renderImageNote(ref, messageOf(error), true)
+      const note = renderImageNote(ref, messageOf(error), true)
+      descriptionCache.set(id, note)
+      return note
     }
   }
 
-  ctx.on('agent/pre-step', async (
-    { agent, signal },
-    next,
-  ): Promise<PreStepDecision> => {
-    const decision = await next()
-    if (decision.kind === 'reject' || signal.aborted) return decision
-    if (!enabled || !decision.messages.some(message => contentHasImage(message.content))) return decision
-    if (await modelAcceptsImages(agent)) return decision
-    const rewritten: UserMessage[] = []
-    for (const message of decision.messages) {
+  function stubNote(block: Extract<ContentBlock, { type: 'image' }>): string {
+    const id = String(block.attachment.attachmentId)
+    const cached = descriptionCache.get(id)
+    if (cached !== undefined) {
+      return `${cached}\n（像素未再次发送；如需重看请调用 vision_chat，attachment_id="${id}"。）`
+    }
+    return `【图片附件 ${id}】此前已发送过此图。如需重看请调用 vision_chat（attachment_id="${id}"）。`
+  }
+
+  async function projectMessages(
+    messages: readonly Message[],
+    acceptImages: boolean,
+    signal: AbortSignal,
+  ): Promise<Message[]> {
+    let lastImageUser = -1
+    if (acceptImages) {
+      for (let index = 0; index < messages.length; index++) {
+        const message = messages[index]
+        if (message?.role === 'user' && contentHasImage(message.content)) lastImageUser = index
+      }
+    }
+    const projected: Message[] = []
+    let changed = false
+    for (let index = 0; index < messages.length; index++) {
+      const message = messages[index]
+      if (message === undefined) continue
+      if (!contentHasImage(message.content)) {
+        projected.push(message)
+        continue
+      }
+      const keepPixels = acceptImages && index === lastImageUser
       const content: ContentBlock[] = []
       for (const block of message.content) {
         if (block.type !== 'image') {
           content.push(block)
           continue
         }
-        content.push({ type: 'text', text: await translateBlock(block, signal) })
+        remember(block.attachment)
+        if (keepPixels) {
+          content.push(block)
+          continue
+        }
+        changed = true
+        const text = acceptImages
+          ? stubNote(block)
+          : await translateBlock(block, signal)
+        content.push({ type: 'text', text })
       }
-      rewritten.push({ ...message, content })
+      projected.push({ ...message, content })
     }
-    return { kind: 'enter', messages: rewritten }
+    return changed ? projected : [...messages]
+  }
+
+  ctx.on('agent/request-messages', async (
+    { agent, signal, messages },
+    next,
+  ): Promise<Message[]> => {
+    const incoming = await next()
+    if (!enabled || signal.aborted) return incoming
+    const source = incoming.length > 0 ? incoming : messages
+    if (!source.some(message => contentHasImage(message.content))) return incoming
+    return projectMessages(source, await modelAcceptsImages(agent), signal)
   }, { prepend: true })
 
   const visionChatTool = defineTool({

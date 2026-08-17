@@ -56,8 +56,10 @@ pnpm dist:win
 3. `electron-builder --win dir --x64` —— 产出 `website/download/win-unpacked`（注意是
    `--win dir`，命令行覆盖了 `build.win.target`）
 4. `set-icon.cjs` —— 给 Electron 主程序设图标
-5. `append-payload.mjs` —— 组装最终 `website/download/dsh-desktop-setup-x64.exe`
-6. `write-latest-yml.mjs` —— 写 `website/download/latest.yml`（更新功能用）
+5. `append-payload.mjs` —— 组装最终 `website/download/dsh-desktop-setup-x64.exe`；
+   同时写出 `file-index.json`，并在存在上一版清单时组装
+   `dsh-desktop-patch-<from>-<to>-x64.exe`
+6. `write-latest-yml.mjs` —— 写 `website/download/latest.yml`（更新功能用，含可选 `patches:`）
 
 ## 五、关键脚本
 
@@ -66,7 +68,8 @@ pnpm dist:win
 | `scripts/prepare-runtime.mjs` | 本地 harness 构建覆盖到 npm 内核 → `output/dsh-runtime`；须一并拷贝 `cordis.patch.yml`/`cordis.yml`（bundle manifest） |
 | `scripts/append-payload.mjs` | 复制 `assets/icon.ico`→`loader/icon.ico`；`go build -ldflags '-s -w -H windowsgui'`；rcedit `--set-icon`；按 size 升序排序 shell+runtime 文件；组装最终 exe |
 | `scripts/generate-loader-bg.mjs` | sharp 生成 `loader/installer-bg.png`（760x480）与 `loader-bg.png` |
-| `scripts/write-latest-yml.mjs` | 写 `latest.yml`（version / sha512 / size / release URL） |
+| `scripts/write-latest-yml.mjs` | 写 `latest.yml`（version / sha512 / size / release URL；若有增量包则写 `patches:`） |
+| `scripts/file-index.mjs` | 上一版文件哈希清单，供 `append-payload.mjs` 生成增量包 |
 
 ## 六、UI 规范（`loader/main.go`）
 
@@ -77,13 +80,18 @@ pnpm dist:win
   容量提示「本次安装约需 X · 目标盘剩余 Y」（`GetDiskFreeSpaceExW`）、安装按钮（590,386,130,44）。
 - **单实例**：`CreateMutexW`（`Local\` 会话级）防重复打开；第二个实例激活已有窗口后退出。
   提权交接（`--dir`）实例会短暂重试互斥量，原实例在 `relaunchElevated` 前 `releaseSingleInstance`。
-- **更新 = 重新安装**：内置更新器只负责「下载安装包 + 启动安装器」。下载完成后以普通令牌
-  直接打开安装包 exe（等同双击），用户走与首次安装完全相同的三步流程：选目录（默认取
-  `C:\dsh-desktop.ini` 的上次安装目录）→ 点「安装」（此时才提权）→ 完成页勾选启动。
+- **更新 = 下载 + 启动安装器**：内置更新器下载安装包（优先增量包）后以普通令牌打开
+  exe（等同双击）。用户走与首次安装相同的三步流程：选目录（默认取
+  `C:\dsh-desktop.ini` 的上次安装目录）→ 点「安装」或「更新」（此时才提权）→ 完成页勾选启动。
   安装前进程检测会询问是否结束正在运行的 DSH Desktop，因此更新时应用无需先退出；
   **不存在任何静默覆盖通道**（`--installer-worker` 自更新模式已移除）。
-- **增量覆盖**：payload manifest 带每文件 `sha256`。更新时若目标文件已存在且哈希一致则跳过写入，
-  只覆盖有改动的部分（首次安装仍会写出全部文件）。
+- **安装时增量覆盖**：payload manifest 带每文件 `sha256`。目标文件已存在且哈希一致则跳过写入。
+- **下载增量包**：`pnpm dist:win` 对照上一版 `website/download/file-index.json`，把有改动或
+  被删除的文件打成 `dsh-desktop-patch-<from>-<to>-x64.exe`（同一套 Go 加载器，runtime
+  manifest 的 `kind` 为 `patch`）。`latest.yml` 的 `patches:` 列出该包；更新器在当前版本
+  等于 `from` 时只下载增量包，对不上或强制重装则回退完整安装包。增量包只能覆盖已有安装。
+  **首次安装、跨版本跳跃、以及尚未带此更新器的旧版本（例如 0.1.4）升上来，仍走完整包。**
+  发 GitHub Release 时完整包和增量包都要上传。
 - **安装前进程检测**：点「安装」后（提权副本内）用 PowerShell CIM 枚举目标目录下运行的
   DSH Desktop 进程，有则 `MessageBoxW`（是/否，默认否）询问是否结束；「是」则
   `taskkill /F /T` 并轮询至多 5s 等文件释放。「否」则中止安装。

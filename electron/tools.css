@@ -1651,8 +1651,132 @@ select.tools-input {
   color: #cfe2ff;
 }
 
+/* Heading/search stay put; the catalog scrolls inside the clipped stage. */
+.tool-stage--plugins {
+  overflow: hidden;
+}
+
+.plugin-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: -4px 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(77, 107, 254, 0.16), rgba(16, 24, 38, 0.2) 48%, rgba(127, 209, 168, 0.08)),
+    #101826;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.plugin-hero__copy {
+  flex: 1;
+  min-width: 0;
+  color: #b7c4db;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.plugin-hero__copy code {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  color: #d5e6ff;
+}
+
+.plugin-hero__chips {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 280px;
+}
+
+.plugin-hero__chips span {
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #c5d4ef;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.plugin-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.plugin-toolbar__search {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
+.plugin-toolbar__install {
+  flex: 1 1 280px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 240px;
+}
+
+.plugin-toolbar__install .tools-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.plugin-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 6px;
+  margin-right: -4px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(157, 189, 245, 0.4) transparent;
+}
+
+.plugin-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.plugin-scroll::-webkit-scrollbar-thumb {
+  background: rgba(157, 189, 245, 0.32);
+  border-radius: 999px;
+}
+
+.plugin-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(157, 189, 245, 0.5);
+}
+
 .plugin-section {
   margin-bottom: 18px;
+}
+
+.plugin-section:last-child {
+  margin-bottom: 6px;
+}
+
+.plugin-section__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.plugin-section__meta {
+  color: #7e8aa3;
+  font-size: 11.5px;
 }
 
 .plugin-list {
@@ -1661,41 +1785,131 @@ select.tools-input {
   gap: 8px;
 }
 
+.plugin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.plugin-grid > .empty-note {
+  grid-column: 1 / -1;
+}
+
 .plugin-card {
-  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px 14px 12px;
   border-radius: 12px;
   background: #101826;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.plugin-card:hover {
+  border-color: rgba(80, 140, 255, 0.4);
+  background: #121c2e;
+  transform: translateY(-1px);
+}
+
+.plugin-card.is-installed {
+  border-color: rgba(127, 209, 168, 0.28);
 }
 
 .plugin-card__head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  margin-bottom: 6px;
 }
 
-.plugin-card__head strong {
+.plugin-card__mark {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: hsl(var(--plugin-hue, 220) 58% 42% / 0.28);
+  color: hsl(var(--plugin-hue, 220) 82% 80%);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.plugin-card__title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plugin-card__title strong {
   font-size: 13.5px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.plugin-card__desc,
-.plugin-card__spec {
+.plugin-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.plugin-card__desc {
   color: #9aa7bf;
   font-size: 12.5px;
   line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .plugin-card__spec {
-  margin-top: 4px;
+  margin-top: auto;
   font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11.5px;
   color: #7e8aa3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
+  -webkit-user-select: all;
 }
 
 .plugin-card__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 2px;
+}
+
+.plugin-card--installed {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.plugin-card--installed .plugin-card__title {
+  flex: 1;
+}
+
+.plugin-card--installed .plugin-card__spec {
+  margin-top: 0;
+}
+
+.plugin-card--installed .plugin-card__actions {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
+.plugin-status {
+  flex: 0 0 auto;
+  margin: 10px 0 0;
 }
 
 .side-card-group {

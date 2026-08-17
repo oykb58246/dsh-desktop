@@ -7,7 +7,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
-import type { LlmCallConfig, LlmFailure, ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
+import type { LlmCallConfig, LlmFailure, Message, ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { AgentCancelCause, Session, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
 export type { AgentCancelCause } from '@deepseek-ai/dsh-session'
 import type { Inbox } from './inbox.ts'
@@ -242,6 +242,21 @@ declare module '@deepseek-ai/cordis' {
      * @mode waterfall
     */
     'agent/request'(this: Scoped<Agent>, payload: { agent: Agent; turn: number; step: number; signal: AbortSignal }, next: () => Promise<LlmCallConfig>): Promise<LlmCallConfig>
+    /**
+     * Replace the derived conversation that this step will send to the model.
+     * `await next()` yields `session.deriveMessages()` at the step/start
+     * boundary. Return a replacement to project image blocks (describe them
+     * for a text-only route, or drop earlier pixels on a multimodal route)
+     * without rewriting the durable user/message log the UI reads.
+     * @param payload.agent - the agent making the model call.
+     * @param payload.turn - the open turn number.
+     * @param payload.step - the step whose request this is.
+     * @param payload.signal - the current turn's explicit abort signal.
+     * @param payload.messages - the durable derivation at this boundary.
+     * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.
+     * @mode waterfall
+     */
+    'agent/request-messages'(this: Scoped<Agent>, payload: { agent: Agent; turn: number; step: number; signal: AbortSignal; messages: readonly Message[] }, next: () => Promise<Message[]>): Promise<Message[]>
     /**
      * Handle one failed model-request attempt before the loop retries or closes
      * its step. A listener returns `{ kind: 'retry' }` without calling `next()`

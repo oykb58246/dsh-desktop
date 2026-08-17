@@ -10,12 +10,15 @@
  *   2. GitHub Releases (`releases/latest`) as a fallback for repos that
  *      publish releases without committing the download folder.
  *
- * Update mechanics: download `dsh-desktop-setup-x64.exe`, verify its sha512
- * against the manifest, then launch it with the user's normal token — exactly
- * like opening the installer manually. The user walks the standard three-step
- * install flow (choose directory → install → launch); the installer itself
- * asks whether to close a running DSH Desktop when the target directory is in
- * use, so the app never quits or overlays itself in the background.
+ * Update mechanics: download either the incremental patch (when latest.yml
+ * lists a patch whose `from` matches the running version) or the full
+ * `dsh-desktop-setup-x64.exe`, verify sha512 against the manifest, then
+ * launch it with the user's normal token — exactly like opening the installer
+ * manually. The user walks the standard three-step install flow (choose
+ * directory → install → launch); the installer itself asks whether to close a
+ * running DSH Desktop when the target directory is in use, so the app never
+ * quits or overlays itself in the background. Force-reinstall always uses the
+ * full package.
  *
  * For local testing the manifest URL can be overridden with the
  * `DSH_DESKTOP_UPDATE_MANIFEST` env var (a full latest.yml URL; the download
@@ -29,10 +32,18 @@ import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import {
+  SETUP_ARTIFACT,
+  parseLatestYml,
+  normalizeVersion,
+  compareVersions,
+  selectUpdateArtifact,
+} from './update-manifest.mjs'
+
+export { SETUP_ARTIFACT, parseLatestYml, compareVersions, selectUpdateArtifact }
 
 export const OFFICIAL_REPO = 'oykb58246/dsh-desktop'
 export const OFFICIAL_REPO_URL = `https://github.com/${OFFICIAL_REPO}`
-export const SETUP_ARTIFACT = 'dsh-desktop-setup-x64.exe'
 
 const RAW_BASE = `https://raw.githubusercontent.com/${OFFICIAL_REPO}/main`
 const DEFAULT_MANIFEST_URL = `${RAW_BASE}/website/download/latest.yml`
@@ -90,28 +101,6 @@ async function fetchJson(url, extraHeaders, timeoutMs) {
   return await response.json()
 }
 
-/** Minimal parser for the electron-builder `latest.yml` subset we consume. */
-function parseLatestYml(text) {
-  const clean = String(text).replace(/^\uFEFF/, '')
-  const grab = (regex) => {
-    const match = regex.exec(clean)
-    return match === null ? null : match[1].trim()
-  }
-  const version = grab(/^version:\s*([^\s#]+)/m)
-  if (version === null) return null
-  const fileUrl = grab(/^\s*-\s*url:\s*(\S+)/m) ?? grab(/^url:\s*(\S+)/m) ?? SETUP_ARTIFACT
-  const sha512 = grab(/^\s*sha512:\s*(\S+)/m)
-  const size = grab(/^\s*size:\s*(\d+)/m)
-  const releaseDate = grab(/^releaseDate:\s*'?([^'\r\n]+)'?/m)
-  return {
-    version,
-    fileUrl,
-    sha512,
-    size: size === null ? null : Number(size),
-    releaseDate: releaseDate === null ? null : releaseDate,
-  }
-}
-
 /**
  * Resolve the official baseline. Returns null when the official repo has not
  * published a baseline yet; throws when the update sources are unreachable.
@@ -125,12 +114,21 @@ async function fetchManifest() {
     const text = await fetchText(MANIFEST_URL, 20_000)
     const parsed = parseLatestYml(text)
     if (parsed !== null) {
+      const patch = parsed.patches?.[0]
+        ? {
+            from: parsed.patches[0].from,
+            url: new URL(parsed.patches[0].url, MANIFEST_URL).href,
+            sha512: parsed.patches[0].sha512,
+            size: parsed.patches[0].size,
+          }
+        : null
       return {
         version: parsed.version,
         releaseDate: parsed.releaseDate,
         size: parsed.size,
         sha512: parsed.sha512,
         url: new URL(parsed.fileUrl, MANIFEST_URL).href,
+        patch,
         source: 'repo-latest-yml',
         sourceLabel: '官方仓库 latest.yml',
       }
@@ -150,12 +148,24 @@ async function fetchManifest() {
       ?? assets.find((a) => typeof a?.name === 'string' && /setup.*\.exe$/i.test(a.name))
       ?? assets.find((a) => typeof a?.name === 'string' && a.name.endsWith('.exe'))
     if (version !== '' && typeof asset?.browser_download_url === 'string') {
+      const current = normalizeVersion(options?.version ?? app.getVersion())
+      const patchName = `dsh-desktop-patch-${current}-${version}-x64.exe`
+      const patchAsset = assets.find((row) => row?.name === patchName)
       return {
         version,
         releaseDate: json?.published_at ?? null,
         size: typeof asset.size === 'number' ? asset.size : null,
         sha512: null,
         url: asset.browser_download_url,
+        patch: typeof patchAsset?.browser_download_url === 'string'
+          ? {
+              from: current,
+              url: patchAsset.browser_download_url,
+              sha512: null,
+              size: typeof patchAsset.size === 'number' ? patchAsset.size : null,
+              fileName: patchName,
+            }
+          : null,
         source: 'github-release',
         sourceLabel: `GitHub Release ${json?.tag_name ?? version}`,
       }
@@ -172,26 +182,6 @@ async function fetchManifest() {
   return null
 }
 
-/** Compare two dotted version strings numerically (ignores a leading `v`). */
-export function compareVersions(a, b) {
-  const norm = (value) => String(value).trim().replace(/^v/i, '')
-  const left = norm(a).split(/[.-]/)
-  const right = norm(b).split(/[.-]/)
-  const length = Math.max(left.length, right.length)
-  for (let index = 0; index < length; index += 1) {
-    const x = left[index] ?? ''
-    const y = right[index] ?? ''
-    const nx = /^\d+$/.test(x) ? Number.parseInt(x, 10) : null
-    const ny = /^\d+$/.test(y) ? Number.parseInt(y, 10) : null
-    if (nx !== null && ny !== null) {
-      if (nx !== ny) return nx < ny ? -1 : 1
-    } else if (x !== y) {
-      return x < y ? -1 : 1
-    }
-  }
-  return 0
-}
-
 function sendProgress(payload) {
   options?.sendProgress?.(payload)
 }
@@ -201,6 +191,10 @@ function snapshot() {
   const latest = state.latest
   const downloaded = state.downloaded
   const installed = options?.installed?.() ?? false
+  const updateAvailable = latest !== null && compareVersions(latest.version, current) > 0
+  const selected = latest === null
+    ? null
+    : selectUpdateArtifact(latest, current, updateAvailable ? 'auto' : 'full')
   return {
     current,
     repo: OFFICIAL_REPO,
@@ -212,20 +206,29 @@ function snapshot() {
       : {
           version: latest.version,
           releaseDate: latest.releaseDate,
-          size: latest.size,
-          sha512: latest.sha512,
-          url: latest.url,
+          size: selected.size,
+          sha512: selected.sha512,
+          url: selected.url,
           source: latest.source,
           sourceLabel: latest.sourceLabel,
+          channel: selected.channel,
+          patchFrom: selected.patchFrom,
+          fullSize: latest.size,
+          patchSize: latest.patch?.size ?? null,
         },
-    updateAvailable: latest !== null && compareVersions(latest.version, current) > 0,
+    updateAvailable,
     checkedAt: state.checkedAt,
     error: state.checkError,
     downloading: state.downloading,
     downloadError: state.downloadError,
     downloaded: downloaded === null
       ? null
-      : { size: downloaded.size, sha512Ok: downloaded.sha512Ok, ready: downloaded.ready },
+      : {
+          size: downloaded.size,
+          sha512Ok: downloaded.sha512Ok,
+          ready: downloaded.ready,
+          channel: downloaded.channel ?? 'full',
+        },
     kernel: { bundled: options?.kernelBundled?.() ?? null, latest: state.kernelLatest },
   }
 }
@@ -260,16 +263,19 @@ export async function runBackgroundCheck() {
 }
 
 /** Download the baseline artifact with progress + sha512 verification. */
-export async function downloadUpdate() {
+export async function downloadUpdate(mode = 'auto') {
   if (state.downloading) return snapshot()
-  if (state.downloaded?.ready) return snapshot()
   if (state.latest === null) {
     throw new Error(state.checkError ?? '没有可用的官方基线版本')
   }
-  const latest = state.latest
+  const current = options?.version ?? app.getVersion()
+  const snap = snapshot()
+  const wanted = selectUpdateArtifact(state.latest, current, snap.updateAvailable ? mode : 'full')
+  if (state.downloaded?.ready && state.downloaded.channel === wanted.channel) return snapshot()
+
   const updatesDir = path.join(app.getPath('userData'), 'updates')
   await mkdir(updatesDir, { recursive: true })
-  const target = path.join(updatesDir, SETUP_ARTIFACT)
+  const target = path.join(updatesDir, wanted.fileName)
   const partial = `${target}.${randomUUID()}.part`
 
   state.downloading = true
@@ -284,13 +290,13 @@ export async function downloadUpdate() {
   ])
 
   try {
-    const response = await fetch(latest.url, {
+    const response = await fetch(wanted.url, {
       headers: { 'user-agent': USER_AGENT },
       redirect: 'follow',
       signal: downloadSignal,
     })
     if (!response.ok || response.body === null) throw new Error(`HTTP ${response.status}`)
-    const total = Number(response.headers.get('content-length') ?? latest.size ?? 0)
+    const total = Number(response.headers.get('content-length') ?? wanted.size ?? 0)
     let received = 0
     let lastPercent = -1
     const hash = createHash('sha512')
@@ -312,8 +318,8 @@ export async function downloadUpdate() {
     })
 
     const digest = hash.digest('base64')
-    const sha512Ok = latest.sha512 !== null ? digest === latest.sha512 : null
-    const sizeOk = latest.size !== null && Number.isFinite(latest.size) ? received === latest.size : true
+    const sha512Ok = wanted.sha512 !== null ? digest === wanted.sha512 : null
+    const sizeOk = wanted.size !== null && Number.isFinite(wanted.size) ? received === wanted.size : true
     sendProgress({ phase: 'verify', received, total: received, percent: 100, sha512Ok, sizeOk })
     if (sha512Ok === false || !sizeOk) {
       state.downloadError = sha512Ok === false
@@ -326,7 +332,7 @@ export async function downloadUpdate() {
     }
 
     await rename(partial, target)
-    state.downloaded = { path: target, size: received, sha512Ok, ready: true }
+    state.downloaded = { path: target, size: received, sha512Ok, ready: true, channel: wanted.channel }
     state.downloading = false
     return snapshot()
   } catch (error) {
@@ -381,7 +387,7 @@ export function registerUpdateIpc(registerOptions) {
   options = registerOptions
   ipcMain.handle('update:info', () => snapshot())
   ipcMain.handle('update:check', () => checkForUpdates())
-  ipcMain.handle('update:download', () => downloadUpdate())
+  ipcMain.handle('update:download', (_event, mode) => downloadUpdate(mode === 'full' ? 'full' : 'auto'))
   ipcMain.handle('update:cancel', () => cancelDownload())
   ipcMain.handle('update:apply', () => applyUpdate())
   ipcMain.handle('update:open-repo', () => {

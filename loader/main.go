@@ -97,8 +97,21 @@ type shellManifest struct {
 }
 
 type runtimeManifest struct {
+	Kind             string      `json:"kind,omitempty"`
+	FromVersion      string      `json:"fromVersion,omitempty"`
+	ToVersion        string      `json:"toVersion,omitempty"`
+	RemoveShell      []string    `json:"removeShell,omitempty"`
+	RemoveRuntime    []string    `json:"removeRuntime,omitempty"`
 	ShellManifestLen int         `json:"shellManifestLen"`
 	Files            []fileEntry `json:"files"`
+}
+
+type payloadMeta struct {
+	Kind          string
+	FromVersion   string
+	ToVersion     string
+	RemoveShell   []string
+	RemoveRuntime []string
 }
 
 type rect struct{ left, top, right, bottom int32 }
@@ -304,6 +317,8 @@ var (
 	doneHeading     = "安装完成"
 
 	installSizeBytes int64
+	isPatch          bool
+	loadedMeta       payloadMeta
 
 	minBtn   = rect{winW - 84, 0, winW - 42, barH}
 	closeBtn = rect{winW - 42, 0, winW, barH}
@@ -501,12 +516,22 @@ func paintAll() {
 
 	switch current {
 	case pageDir:
-		drawText(offDC, "选择安装目录", rect{70, 78, winW - 70, 122}, colHeading, 24, true, DT_CENTER)
-		drawText(offDC, "应用与运行时将安装到所选目录，数据直接从安装器解压。", rect{70, 132, winW - 70, 158}, colBody, 13, false, DT_CENTER)
+		dirTitle := "选择安装目录"
+		dirLede := "应用与运行时将安装到所选目录，数据直接从安装器解压。"
+		cap := "本次安装约需 " + fmtBytes(uint64(installSizeBytes))
+		if isPatch {
+			dirTitle = "增量更新"
+			dirLede = "只覆盖有改动的文件，未改动的保持原样。请选择已安装的 DSH Desktop 目录。"
+			if loadedMeta.FromVersion != "" && loadedMeta.ToVersion != "" {
+				dirLede = fmt.Sprintf("从 v%s 更新到 v%s。只覆盖有改动的文件，请选择已安装目录。", loadedMeta.FromVersion, loadedMeta.ToVersion)
+			}
+			cap = "本次更新约需 " + fmtBytes(uint64(installSizeBytes))
+		}
+		drawText(offDC, dirTitle, rect{70, 78, winW - 70, 122}, colHeading, 24, true, DT_CENTER)
+		drawText(offDC, dirLede, rect{70, 132, winW - 70, 196}, colBody, 13, false, DT_CENTER|DT_WORDBREAK)
 		// Input row (vertically centered in the content area below the title bar).
 		panel := rect{90, 232, 570, 268}
 		procFillRect.Call(offDC, uintptr(unsafe.Pointer(&panel)), editBrush)
-		cap := "本次安装约需 " + fmtBytes(uint64(installSizeBytes))
 		if free := freeBytes(installDir); free > 0 {
 			cap += "　·　目标盘剩余 " + fmtBytes(free)
 		}
@@ -761,61 +786,113 @@ func readAtFull(f *os.File, off, n int64) ([]byte, error) {
 	return buf, err
 }
 
-func readManifests(exe string) (shellFiles, runtimeFiles []fileEntry, shellTotal, runtimeTotal int64, err error) {
+func readManifests(exe string) (shellFiles, runtimeFiles []fileEntry, shellTotal, runtimeTotal int64, meta payloadMeta, err error) {
 	f, err := os.Open(exe)
 	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, 0, meta, err
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, 0, meta, err
 	}
 	if st.Size() < 12 {
-		return nil, nil, 0, 0, fmt.Errorf("installer too small")
+		return nil, nil, 0, 0, meta, fmt.Errorf("installer too small")
 	}
 	tail, err := readAtFull(f, st.Size()-12, 12)
 	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, 0, meta, err
 	}
 	if string(tail[4:]) != magicRuntime {
-		return nil, nil, 0, 0, fmt.Errorf("runtime section missing")
+		return nil, nil, 0, 0, meta, fmt.Errorf("runtime section missing")
 	}
 	mlen := int64(binary.LittleEndian.Uint32(tail[0:4]))
 	mbuf, err := readAtFull(f, st.Size()-12-mlen, mlen)
 	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, 0, meta, err
 	}
 	var rt runtimeManifest
 	if err := json.Unmarshal(mbuf, &rt); err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, 0, meta, err
 	}
-	if len(rt.Files) == 0 {
-		return nil, nil, 0, 0, fmt.Errorf("runtime manifest empty")
+	meta = payloadMeta{
+		Kind:          rt.Kind,
+		FromVersion:   rt.FromVersion,
+		ToVersion:     rt.ToVersion,
+		RemoveShell:   rt.RemoveShell,
+		RemoveRuntime: rt.RemoveRuntime,
 	}
-	shellEnd := rt.Files[0].Offset
+	if rt.Kind != "patch" && len(rt.Files) == 0 {
+		return nil, nil, 0, 0, meta, fmt.Errorf("runtime manifest empty")
+	}
+	runtimeManifestStart := st.Size() - 12 - mlen
+	shellEnd := runtimeManifestStart
+	if len(rt.Files) > 0 {
+		shellEnd = rt.Files[0].Offset
+	}
 	shellTail, err := readAtFull(f, shellEnd-12, 12)
 	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, 0, meta, err
 	}
 	if string(shellTail[4:]) != magicShell {
-		return nil, nil, 0, 0, fmt.Errorf("shell section missing")
+		return nil, nil, 0, 0, meta, fmt.Errorf("shell section missing")
 	}
 	slen := int64(binary.LittleEndian.Uint32(shellTail[0:4]))
 	smbuf, err := readAtFull(f, shellEnd-12-slen, slen)
 	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, 0, meta, err
 	}
 	var sm shellManifest
 	if err := json.Unmarshal(smbuf, &sm); err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, 0, meta, err
 	}
-	first := sm.Files[0].Offset
-	shellTotal = shellEnd - first
+	if rt.Kind != "patch" && len(sm.Files) == 0 {
+		return nil, nil, 0, 0, meta, fmt.Errorf("shell manifest empty")
+	}
+	for _, fe := range sm.Files {
+		shellTotal += fe.Size
+	}
 	for _, fe := range rt.Files {
 		runtimeTotal += fe.Size
 	}
-	return sm.Files, rt.Files, shellTotal, runtimeTotal, nil
+	return sm.Files, rt.Files, shellTotal, runtimeTotal, meta, nil
+}
+
+func looksLikeInstall(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, "DSH Desktop.exe")); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(dir, "resources", "dsh-runtime")); err == nil {
+		return true
+	}
+	return false
+}
+
+func safeJoin(root, rel string) (string, bool) {
+	cleaned := filepath.Clean(filepath.FromSlash(rel))
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) || filepath.IsAbs(cleaned) {
+		return "", false
+	}
+	full := filepath.Join(root, cleaned)
+	relToRoot, err := filepath.Rel(root, full)
+	if err != nil || strings.HasPrefix(relToRoot, "..") {
+		return "", false
+	}
+	return full, true
+}
+
+func removeListed(root string, rels []string) int {
+	removed := 0
+	for _, rel := range rels {
+		dest, ok := safeJoin(root, rel)
+		if !ok {
+			continue
+		}
+		if err := os.Remove(dest); err == nil {
+			removed++
+		}
+	}
+	return removed
 }
 
 // fileSHA256 returns the hex sha256 of dest, used to skip unchanged overlay files.
@@ -917,7 +994,7 @@ func installTo(target string) error {
 			return err
 		}
 	}
-	shellFiles, runtimeFiles, _, _, err := readManifests(exe)
+	shellFiles, runtimeFiles, _, _, meta, err := readManifests(exe)
 	if err != nil {
 		return err
 	}
@@ -935,10 +1012,15 @@ func installTo(target string) error {
 		// Cap at 99% while copying: the final percent belongs to the
 		// initialization phase below, so the bar visibly holds at 99% while
 		// the app tree is warmed and registered.
-		progressPct = float64(done) / float64(total) * 0.99
+		if total > 0 {
+			progressPct = float64(done) / float64(total) * 0.99
+		} else {
+			progressPct = 0.99
+		}
 		statusText = fmt.Sprintf("%d/%d · %s", done, total, name)
 		paintAll()
 	}
+	warmQueue = make(chan string, 1024)
 	warmDone := make(chan struct{})
 	go warmWorker(warmDone)
 	for _, fe := range shellFiles {
@@ -966,6 +1048,10 @@ func installTo(target string) error {
 			warmQueue <- dest
 		}
 		report(fe.Path)
+	}
+	if meta.Kind == "patch" {
+		_ = removeListed(target, meta.RemoveShell)
+		_ = removeListed(filepath.Join(target, "resources", "dsh-runtime"), meta.RemoveRuntime)
 	}
 	// Files are copied (99%): finish initializing off-screen — drain the
 	// warm-up read-back (OS cache + antivirus scan of the fresh tree), then
@@ -1242,9 +1328,13 @@ func browseDir() {
 }
 
 func showDirPage() {
+	action := "安装"
+	if isPatch {
+		action = "更新"
+	}
 	setPage(pageDir, []button{
 		{x: 570, y: 232, w: 100, h: 36, label: "浏览…", primary: false, click: browseDir},
-		{x: 590, y: 386, w: 130, h: 44, label: "安装", primary: true, click: startInstall},
+		{x: 590, y: 386, w: 130, h: 44, label: action, primary: true, click: startInstall},
 	})
 }
 
@@ -1254,6 +1344,16 @@ func startInstall() {
 	}
 	installing = true
 	installDir = readEditDir()
+	if isPatch && !looksLikeInstall(installDir) {
+		installing = false
+		procMessageBoxW.Call(
+			hwnd,
+			uintptr(unsafe.Pointer(utf16Ptr("这是增量更新包，只能覆盖已经装好的 DSH Desktop。\n\n请选择现有安装目录，或改用完整安装包做首次安装。"))),
+			uintptr(unsafe.Pointer(utf16Ptr("DSH Desktop 更新"))),
+			mbIconWarning,
+		)
+		return
+	}
 	// The post-install steps (HKLM uninstall key, C:\dsh-desktop.ini,
 	// ProgramData shortcuts, Defender exclusion) need an elevated token:
 	// relaunch through UAC with the chosen directory and let the elevated
@@ -1295,14 +1395,22 @@ func startInstall() {
 		}
 	}
 	progressPct = 0
-	statusText = "准备安装…"
+	if isPatch {
+		statusText = "准备更新…"
+	} else {
+		statusText = "准备安装…"
+	}
 	setPage(pageProgress, nil)
 	go func() {
 		err := installTo(installDir)
 		if err != nil {
 			installing = false
 			doneOk = false
-			doneText = "安装失败：" + err.Error()
+			if isPatch {
+				doneText = "更新失败：" + err.Error()
+			} else {
+				doneText = "安装失败：" + err.Error()
+			}
 			setPage(pageDone, []button{
 				{x: 590, y: 386, w: 130, h: 44, label: "关闭", primary: true, click: func() {
 					procPostMessage.Call(hwnd, WM_CLOSE, 0, 0)
@@ -1381,8 +1489,14 @@ func main() {
 		return
 	}
 	if exePath, err := os.Executable(); err == nil {
-		if _, _, shellTotal, runtimeTotal, err := readManifests(exePath); err == nil {
+		if _, _, shellTotal, runtimeTotal, meta, err := readManifests(exePath); err == nil {
 			installSizeBytes = shellTotal + runtimeTotal
+			loadedMeta = meta
+			isPatch = meta.Kind == "patch"
+			if isPatch {
+				progressHeading = "正在更新"
+				doneHeading = "更新完成"
+			}
 		}
 	}
 	img, _, err := image.Decode(bytes.NewReader(bgPng))

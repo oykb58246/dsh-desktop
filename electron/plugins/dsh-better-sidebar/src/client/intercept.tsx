@@ -34,7 +34,11 @@ export function SidebarProducedFiles(props: {
   const shown = matched.slice(0, 6)
   const hidden = matched.length - shown.length
   return (
-    <div className={css.producedRow}>
+    <div
+      className={css.producedRow}
+      data-produced-files-row
+      data-produced-files={JSON.stringify(matched)}
+    >
       <span className={css.producedLabel}>{t('produced')}</span>
       {shown.map(path => {
         const at = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))

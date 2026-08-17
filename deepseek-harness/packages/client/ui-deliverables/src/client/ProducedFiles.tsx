@@ -115,7 +115,7 @@ export function ProducedFiles({
   return (
     <div className={css.root}>
       <span className={css.label}>{t('produced.label')}</span>
-      <div ref={rowRef} className={css.row} data-produced-files-row>
+      <div ref={rowRef} className={css.row} data-produced-files-row data-produced-files={JSON.stringify(paths)}>
         {shown.map(path => (
           <button
             key={path}

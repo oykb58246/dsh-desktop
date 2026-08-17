@@ -61,13 +61,25 @@ export const TURN_CHROME_SCRIPT = `(() => {
     return match ? match[1].trim() : '';
   };
 
-  /** File paths produced by the segment's tool rows. */
+  /** File paths produced by the segment (turn-tail chips or data-produced-files). */
   const producedPaths = (segment) => {
     const out = [];
+    const seen = new Set();
+    const add = (value) => {
+      const path = String(value || '').trim();
+      if (path === '' || seen.has(path)) return;
+      seen.add(path);
+      out.push(path);
+    };
     for (const el of segment) {
-      el.querySelectorAll('[data-produced-files-row] button[title]').forEach((btn) => {
-        const title = btn.getAttribute('title');
-        if (title) out.push(title);
+      el.querySelectorAll('[data-produced-files]').forEach((node) => {
+        try {
+          const parsed = JSON.parse(node.getAttribute('data-produced-files') || '[]');
+          if (Array.isArray(parsed)) for (const item of parsed) add(item);
+        } catch { /* ignore bad payload */ }
+      });
+      el.querySelectorAll('[data-produced-files-row] button[title], [data-turn-tail] button[title]').forEach((btn) => {
+        add(btn.getAttribute('title'));
       });
     }
     return out;
@@ -170,7 +182,9 @@ export const TURN_CHROME_SCRIPT = `(() => {
         });
         bar.querySelector('.revert').addEventListener('click', async (event) => {
           event.stopPropagation();
-          const paths = producedPaths(round.rows);
+          let paths = [];
+          try { paths = JSON.parse(bar.dataset.paths || '[]'); } catch { paths = []; }
+          if (!Array.isArray(paths) || paths.length === 0) paths = producedPaths(round.rows);
           if (paths.length === 0) {
             alert('这一轮没有可回退的文件修改。');
             return;
@@ -179,13 +193,33 @@ export const TURN_CHROME_SCRIPT = `(() => {
           if (api && typeof api.revertFiles === 'function') {
             const result = await api.revertFiles(paths.map((filePath) => ({ path: filePath, op: 'edit' })));
             const ok = (result?.results || []).filter((row) => row.status === 'reverted').length;
-            alert(ok > 0 ? ('已回退 ' + ok + ' 个文件') : (result?.error || '回退未成功。'));
+            const failed = (result?.results || []).filter((row) => row.status !== 'reverted');
+            if (ok > 0 && failed.length === 0) {
+              alert('已回退 ' + ok + ' 个文件');
+            } else if (ok > 0) {
+              alert('已回退 ' + ok + ' 个文件，另有 ' + failed.length + ' 个未能回退。');
+            } else {
+              alert(result?.error || failed[0]?.error || '回退未成功。工作区若不在 git 仓库里，只能回退本轮新建的文件。');
+            }
           }
         });
       }
-      const anchorEl = rows[anchor];
-      if (bar.nextSibling !== anchorEl) flow.insertBefore(bar, anchorEl);
+      // Sit the bar at the TOP of the hidden process block so expand grows
+      // downward (user → bar → tools/think → final answer), not upward from
+      // a marker parked above the closing message.
+      const hideRows = [];
+      for (const el of tools) hideRows.push(el);
+      for (const el of intermediate) {
+        if (!hideRows.includes(el)) hideRows.push(el);
+      }
+      hideRows.sort((a, b) => rows.indexOf(a) - rows.indexOf(b));
+      const insertBefore = hideRows[0] || rows[anchor];
+      if (bar.nextSibling !== insertBefore) flow.insertBefore(bar, insertBefore);
       bar.style.display = '';
+      const paths = producedPaths(rows);
+      bar.dataset.paths = JSON.stringify(paths);
+      const revertBtn = bar.querySelector('.revert');
+      if (revertBtn) revertBtn.hidden = paths.length === 0;
       const chev = bar.querySelector('.chev');
       const label = bar.querySelector('.label');
       const dur = durationOf(round.rows);

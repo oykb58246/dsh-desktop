@@ -2198,6 +2198,8 @@ window.__ModuleLoader__.load({
 			const hidden = matched.length - shown.length;
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: sidebar_module_css_default.producedRow,
+				"data-produced-files-row": true,
+				"data-produced-files": JSON.stringify(matched),
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: sidebar_module_css_default.producedLabel,

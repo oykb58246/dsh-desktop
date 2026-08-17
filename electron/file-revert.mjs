@@ -24,6 +24,17 @@ function resolveInside(root, target) {
   return value === prefix || value.startsWith(prefix + path.sep)
 }
 
+function findGitRoot(start) {
+  let dir = path.resolve(start)
+  for (let i = 0; i < 16; i += 1) {
+    if (existsSync(path.join(dir, '.git'))) return dir
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return null
+}
+
 /** Register revert IPC. `listWorkspaceRoots` returns absolute cwd list. */
 export function registerFileRevertIpc(listWorkspaceRoots) {
   ipcMain.handle('dsh:file-revert', async (_event, payload) => {
@@ -45,31 +56,38 @@ export function registerFileRevertIpc(listWorkspaceRoots) {
       }
       const root = roots.find((dir) => resolveInside(dir, abs)) ?? path.dirname(abs)
       try {
-        if (existsSync(path.join(root, '.git'))) {
-          const rel = path.relative(root, abs).replaceAll('\\', '/')
-          const show = await execGit(root, ['show', `HEAD:${rel}`])
+        const gitRoot = findGitRoot(root) ?? findGitRoot(path.dirname(abs))
+        if (gitRoot !== null) {
+          const rel = path.relative(gitRoot, abs).replaceAll('\\', '/')
+          const show = await execGit(gitRoot, ['show', `HEAD:${rel}`])
           if (show.ok) {
             await writeFile(abs, show.stdout, 'utf8')
             results.push({ path: abs, status: 'reverted' })
             continue
           }
+          // Not in HEAD: this turn created the file — delete it.
           if (existsSync(abs)) {
             await rm(abs, { force: true })
             results.push({ path: abs, status: 'reverted' })
             continue
           }
         }
-        if (typeof change.oldText === 'string' && change.oldText !== '') {
+        if (typeof change.oldText === 'string') {
           const current = existsSync(abs) ? await readFile(abs, 'utf8') : null
-          if (current === change.newText || current === null) {
+          if (change.oldText === '' && existsSync(abs)) {
+            await rm(abs, { force: true })
+            results.push({ path: abs, status: 'reverted' })
+            continue
+          }
+          if (change.oldText !== '' && (current === change.newText || current === null || change.newText === undefined)) {
             await writeFile(abs, change.oldText, 'utf8')
             results.push({ path: abs, status: 'reverted' })
-          } else {
-            results.push({ path: abs, status: 'conflict' })
+            continue
           }
+          results.push({ path: abs, status: 'conflict', error: '文件已继续改过，未覆盖' })
           continue
         }
-        results.push({ path: abs, status: 'missing' })
+        results.push({ path: abs, status: 'missing', error: '工作区不在 git 仓库中，无法还原已有文件' })
       } catch (error) {
         results.push({ path: abs, status: 'failed', error: error instanceof Error ? error.message : String(error) })
       }

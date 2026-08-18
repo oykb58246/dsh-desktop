@@ -2,11 +2,15 @@
 //
 // Confirms, then hands cleanup to an elevated PowerShell script in %TEMP%
 // so this process can exit before its own directory is deleted.
+//
+// The elevated process MUST start with cwd outside the install tree.
+// Explorer / Settings launch this exe with cwd = the install directory;
+// Remove-Item / rmdir of the current directory silently fails and leaves
+// every file behind while still showing “已卸载”.
 package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -15,16 +19,20 @@ import (
 
 const (
 	appGUID        = "2964e23e-3f18-500c-b3e7-68e9fa24df7a"
-	createNoWindow = 0x08000000
 	mbYesNo        = 0x0004
 	mbIconWarning  = 0x0030
 	mbDefButton2   = 0x0100
+	mbIconError    = 0x0010
 	idYes          = 6
+	swShownormal   = 1
+	errorCancelled = 1223
 )
 
 var (
-	user32          = syscall.NewLazyDLL("user32.dll")
-	procMessageBoxW = user32.NewProc("MessageBoxW")
+	user32            = syscall.NewLazyDLL("user32.dll")
+	shell32           = syscall.NewLazyDLL("shell32.dll")
+	procMessageBoxW   = user32.NewProc("MessageBoxW")
+	procShellExecuteW = shell32.NewProc("ShellExecuteW")
 )
 
 func utf16Ptr(s string) *uint16 {
@@ -42,38 +50,69 @@ func messageBox(text, caption string, flags uint) int {
 	return int(r)
 }
 
-func hideConsole(cmd *exec.Cmd) *exec.Cmd {
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
-	return cmd
+func writeUTF8BOM(path, content string) error {
+	return os.WriteFile(path, append([]byte{0xEF, 0xBB, 0xBF}, []byte(content)...), 0o644)
 }
 
-func writeScript(target string) (string, error) {
+func writeScript(target string, silent bool) (string, error) {
 	escaped := strings.ReplaceAll(target, "'", "''")
+	doneMsg := "[System.Windows.MessageBox]::Show('DSH Desktop 已卸载。','DSH Desktop')"
+	failMsg := "[System.Windows.MessageBox]::Show('卸载未完成：部分文件仍留在 ' + $target + '。请关闭占用后手动删除该目录。','DSH Desktop')"
+	finish := "Add-Type -AssemblyName PresentationFramework" + "\r\n" +
+		"if (Test-Path -LiteralPath $target) { " + failMsg + " } else { " + doneMsg + " }"
+	if silent {
+		finish = ""
+	}
 	body := strings.Join([]string{
-		"$ErrorActionPreference = 'SilentlyContinue'",
+		"$ErrorActionPreference = 'Continue'",
 		"$target = '" + escaped + "'",
+		"Set-Location $env:TEMP",
 		"Start-Sleep -Seconds 2",
 		`Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLower().StartsWith($target.TrimEnd('\').ToLower() + '\') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`,
 		"Start-Sleep -Seconds 1",
 		"try { Remove-MpPreference -ExclusionPath $target -ErrorAction SilentlyContinue } catch {}",
-		"Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue",
-		`Remove-Item -LiteralPath 'C:\Users\Public\Desktop\DSH Desktop.lnk' -Force`,
-		`Remove-Item -LiteralPath 'C:\ProgramData\Microsoft\Windows\Start Menu\Programs\DSH Desktop.lnk' -Force`,
-		`Remove-Item -LiteralPath 'C:\ProgramData\Microsoft\Windows\Start Menu\Programs\卸载 DSH Desktop.lnk' -Force`,
-		`Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'Desktop\DSH Desktop.lnk') -Force`,
-		`Remove-Item -LiteralPath (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\DSH Desktop.lnk') -Force`,
-		`Remove-Item -LiteralPath (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\卸载 DSH Desktop.lnk') -Force`,
-		`Remove-Item -LiteralPath 'C:\dsh-desktop.ini' -Force`,
+		`if (Test-Path -LiteralPath $target) { cmd.exe /c ('rmdir /s /q "' + $target + '"') }`,
+		"if (Test-Path -LiteralPath $target) { Get-ChildItem -LiteralPath $target -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue }",
+		"$sh = New-Object -ComObject WScript.Shell",
+		`$lnkDirs = @('C:\Users\Public\Desktop', 'C:\ProgramData\Microsoft\Windows\Start Menu\Programs', (Join-Path $env:USERPROFILE 'Desktop'), (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'))`,
+		"foreach ($d in $lnkDirs) {",
+		"  if (-not (Test-Path -LiteralPath $d)) { continue }",
+		"  Get-ChildItem -LiteralPath $d -Filter '*.lnk' -ErrorAction SilentlyContinue | ForEach-Object {",
+		"    try {",
+		"      $tp = [string]$sh.CreateShortcut($_.FullName).TargetPath",
+		"      if (-not $tp) { return }",
+		"      $low = $tp.ToLowerInvariant(); $root = $target.TrimEnd('\\').ToLowerInvariant()",
+		"      if ($low -eq ($root + '\\dsh desktop.exe') -or $low -eq ($root + '\\uninstall.exe')) {",
+		"        Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue",
+		"      }",
+		"    } catch {}",
+		"  }",
+		"}",
+		// Keep C:\dsh-desktop.ini so the next installer still defaults to
+		// the last InstallPath.
 		"reg delete 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + appGUID + "' /f",
-		"Add-Type -AssemblyName PresentationFramework",
-		"[System.Windows.MessageBox]::Show('DSH Desktop 已卸载。','DSH Desktop')",
+		finish,
 		"",
 	}, "\r\n")
 	path := filepath.Join(os.TempDir(), "dsh-desktop-uninstall.ps1")
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	if err := writeUTF8BOM(path, body); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+func startElevatedPowerShell(script string) uintptr {
+	ps := filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+	params := "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + "\""
+	r, _, _ := procShellExecuteW.Call(
+		0,
+		uintptr(unsafe.Pointer(utf16Ptr("runas"))),
+		uintptr(unsafe.Pointer(utf16Ptr(ps))),
+		uintptr(unsafe.Pointer(utf16Ptr(params))),
+		uintptr(unsafe.Pointer(utf16Ptr(os.TempDir()))),
+		swShownormal,
+	)
+	return r
 }
 
 func main() {
@@ -104,21 +143,18 @@ func main() {
 		}
 	}
 
-	script, err := writeScript(target)
+	script, err := writeScript(target, silent)
 	if err != nil {
-		messageBox("无法写入卸载脚本："+err.Error(), "卸载 DSH Desktop", 0x10)
+		if !silent {
+			messageBox("无法写入卸载脚本："+err.Error(), "卸载 DSH Desktop", mbIconError)
+		}
 		os.Exit(1)
 	}
-	quoted := strings.ReplaceAll(script, "'", "''")
-	cmd := hideConsole(exec.Command(
-		"powershell.exe",
-		"-NoProfile",
-		"-NonInteractive",
-		"-Command",
-		"Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \""+quoted+"\"' -Verb RunAs",
-	))
-	if err := cmd.Start(); err != nil {
-		messageBox("无法启动卸载："+err.Error(), "卸载 DSH Desktop", 0x10)
+	code := startElevatedPowerShell(script)
+	if code <= 32 || code == errorCancelled {
+		if !silent {
+			messageBox("卸载需要管理员权限。若已取消 UAC，请重新运行 Uninstall.exe。", "卸载 DSH Desktop", mbIconError)
+		}
 		os.Exit(1)
 	}
 }

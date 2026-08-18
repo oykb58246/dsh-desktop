@@ -2032,6 +2032,7 @@ function writeUninstallScript(targetDir) {
   const body = [
     "$ErrorActionPreference = 'SilentlyContinue'",
     `$target = '${escaped}'`,
+    'Set-Location $env:TEMP',
     'Start-Sleep -Seconds 2',
     `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLower().StartsWith($target.TrimEnd('\\').ToLower() + '\\') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`,
     'Start-Sleep -Seconds 1',
@@ -2042,7 +2043,6 @@ function writeUninstallScript(targetDir) {
     `Remove-Item -LiteralPath 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\卸载 DSH Desktop.lnk' -Force`,
     `Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'Desktop\\DSH Desktop.lnk') -Force`,
     `Remove-Item -LiteralPath (Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs\\DSH Desktop.lnk') -Force`,
-    `Remove-Item -LiteralPath 'C:\\dsh-desktop.ini' -Force`,
     `reg delete 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${APP_GUID}' /f`,
     "Add-Type -AssemblyName PresentationFramework",
     "[System.Windows.MessageBox]::Show('DSH Desktop 已卸载。','DSH Desktop')",

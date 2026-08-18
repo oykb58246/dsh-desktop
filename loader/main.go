@@ -364,22 +364,44 @@ func freeBytes(path string) uint64 {
 	return free
 }
 
+const (
+	appDirName         = "DSH Desktop"
+	defaultInstallRoot = `C:\Program Files`
+)
+
+// ensureAppDir appends "DSH Desktop" when the chosen folder is not already
+// that directory (last path component, case-insensitive).
+func ensureAppDir(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return filepath.Join(defaultInstallRoot, appDirName)
+	}
+	dir = filepath.Clean(dir)
+	if strings.EqualFold(filepath.Base(dir), appDirName) {
+		return dir
+	}
+	return filepath.Join(dir, appDirName)
+}
+
+func setInstallDir(dir string) {
+	installDir = ensureAppDir(dir)
+	if editHwnd != 0 {
+		procSetWindowTextW.Call(editHwnd, uintptr(unsafe.Pointer(utf16Ptr(installDir))))
+	}
+}
+
 func defaultInstallDir() string {
 	if raw, err := os.ReadFile(`C:\dsh-desktop.ini`); err == nil {
 		for _, line := range strings.Split(string(raw), "\r\n") {
 			if strings.HasPrefix(line, "InstallPath=") {
 				dir := strings.TrimSpace(strings.TrimPrefix(line, "InstallPath="))
 				if dir != "" {
-					return dir
+					return ensureAppDir(dir)
 				}
 			}
 		}
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return `C:\DSH Desktop`
-	}
-	return filepath.Join(home, "DSH Desktop")
+	return ensureAppDir(defaultInstallRoot)
 }
 
 func utf16Ptr(s string) *uint16 {
@@ -1144,8 +1166,8 @@ func relaunchElevated(args ...string) bool {
 // list (best-effort; requires the elevated token the installer runs with).
 // Real-time scanning of the freshly extracted 14k-file runtime is the dominant
 // cold-start cost after install, so excluding the app's own directory makes
-// the first launch (and every launch) start without it. The uninstaller
-// (electron/main.mjs runUninstallWorker) removes the exclusion.
+// the first launch (and every launch) start without it. Uninstall.exe
+// removes the exclusion with Remove-MpPreference.
 func defenderExclude(target string) {
 	escaped := strings.ReplaceAll(target, "'", "''")
 	ps := "try { Add-MpPreference -ExclusionPath '" + escaped + "' -ErrorAction Stop } catch {}"
@@ -1291,14 +1313,50 @@ func registerApp(target string) error {
 }
 
 func createShortcuts(target string) error {
+	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
 	exe := filepath.Join(target, "DSH Desktop.exe")
 	uninstaller := filepath.Join(target, "Uninstall.exe")
-	ps := "$ws = New-Object -ComObject WScript.Shell;"
-	ps += " foreach ($p in @('" + os.Getenv("USERPROFILE") + "\\Desktop\\DSH Desktop.lnk', '" + os.Getenv("APPDATA") + "\\Microsoft\\Windows\\Start Menu\\Programs\\DSH Desktop.lnk')) {"
-	ps += " $s = $ws.CreateShortcut($p); $s.TargetPath = '" + exe + "'; $s.IconLocation = '" + exe + ",0'; $s.Save() };"
-	ps += " $u = $ws.CreateShortcut('" + os.Getenv("APPDATA") + "\\Microsoft\\Windows\\Start Menu\\Programs\\卸载 DSH Desktop.lnk');"
-	ps += " $u.TargetPath = '" + uninstaller + "'; $u.IconLocation = '" + exe + ",0'; $u.Description = '卸载 DSH Desktop'; $u.Save()"
-	return hideConsole(exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)).Run()
+	desktop := filepath.Join(os.Getenv("USERPROFILE"), "Desktop", "DSH Desktop.lnk")
+	userMenu := filepath.Join(os.Getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", "DSH Desktop.lnk")
+	allMenu := `C:\ProgramData\Microsoft\Windows\Start Menu\Programs\DSH Desktop.lnk`
+	userMenuDir := filepath.Join(os.Getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs")
+	allMenuDir := `C:\ProgramData\Microsoft\Windows\Start Menu\Programs`
+	// WScript.Shell Save() goes through the system ANSI code page (this
+	// machine is CP1252). A path containing 「卸载」becomes "??" and Save
+	// fails. Write an ASCII .lnk, then Rename-Item (Win32 Unicode) to the
+	// real name. Char codes keep this script ASCII-only.
+	body := strings.Join([]string{
+		"$ws = New-Object -ComObject WScript.Shell",
+		"$exe = '" + esc(exe) + "'",
+		"$uninstaller = '" + esc(uninstaller) + "'",
+		"$workdir = '" + esc(target) + "'",
+		"function Save-Lnk($path, $targetPath, $icon, $cwd, $desc) {",
+		"  try {",
+		"    $dir = Split-Path -Parent $path; $name = Split-Path -Leaf $path",
+		"    if (-not (Test-Path -LiteralPath $dir)) { return }",
+		"    $tmp = Join-Path $dir ('dsh-lnk-' + [guid]::NewGuid().ToString('N') + '.lnk')",
+		"    $s = $ws.CreateShortcut($tmp)",
+		"    $s.TargetPath = $targetPath; $s.IconLocation = $icon",
+		"    $s.WorkingDirectory = $cwd; $s.Description = $desc; $s.Save()",
+		"    $dest = Join-Path $dir $name",
+		"    if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Force }",
+		"    Rename-Item -LiteralPath $tmp -NewName $name",
+		"  } catch {}",
+		"}",
+		"foreach ($p in @('" + esc(desktop) + "', '" + esc(userMenu) + "', '" + esc(allMenu) + "')) {",
+		"  Save-Lnk $p $exe ($exe + ',0') $workdir 'DSH Desktop'",
+		"}",
+		"$unName = ([string][char]0x5378) + ([string][char]0x8F7D) + ' DSH Desktop.lnk'",
+		"foreach ($d in @('" + esc(userMenuDir) + "', '" + esc(allMenuDir) + "')) {",
+		"  Save-Lnk (Join-Path $d $unName) $uninstaller ($exe + ',0') $env:TEMP 'Uninstall DSH Desktop'",
+		"}",
+		"",
+	}, "\r\n")
+	script := filepath.Join(os.TempDir(), "dsh-desktop-shortcuts.ps1")
+	if err := os.WriteFile(script, append([]byte{0xEF, 0xBB, 0xBF}, []byte(body)...), 0o644); err != nil {
+		return err
+	}
+	return hideConsole(exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script)).Run()
 }
 
 // ---------- UI actions ----------
@@ -1319,11 +1377,7 @@ func browseDir() {
 	r, _, _ := procSHGetPathFromIDList.Call(pidl, uintptr(unsafe.Pointer(&pathBuf[0])))
 	procCoTaskMemFree.Call(pidl)
 	if r != 0 {
-		dir := syscall.UTF16ToString(pathBuf)
-		installDir = dir
-		if editHwnd != 0 {
-			procSetWindowTextW.Call(editHwnd, uintptr(unsafe.Pointer(utf16Ptr(dir))))
-		}
+		setInstallDir(syscall.UTF16ToString(pathBuf))
 	}
 }
 
@@ -1343,7 +1397,7 @@ func startInstall() {
 		return
 	}
 	installing = true
-	installDir = readEditDir()
+	setInstallDir(readEditDir())
 	if isPatch && !looksLikeInstall(installDir) {
 		installing = false
 		procMessageBoxW.Call(
@@ -1512,8 +1566,7 @@ func main() {
 	hInst, _, _ := procGetModuleHandleW.Call(0)
 	editHwnd = createEditControl(hInst)
 	if autoDir != "" {
-		installDir = autoDir
-		procSetWindowTextW.Call(editHwnd, uintptr(unsafe.Pointer(utf16Ptr(autoDir))))
+		setInstallDir(autoDir)
 	}
 	showDirPage()
 	procShowWindow.Call(hwnd, SW_SHOW)

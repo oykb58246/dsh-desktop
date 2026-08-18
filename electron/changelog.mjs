@@ -3,6 +3,17 @@
 // 每条 entry 的 notes 是给用户看的发布说明。
 export const changelog = [
   {
+    version: '0.1.7',
+    date: '2026-08-18',
+    title: '安装目录默认与卸载修复',
+    notes: [
+      '没有上次安装记录时，默认装到 C:\\Program Files\\DSH Desktop',
+      '选择的目录最后一级不是 DSH Desktop 时自动补上这一层',
+      '卸载不再删除 C:\\dsh-desktop.ini，重装和更新仍落到上次目录',
+      '修复从开始菜单或系统设置卸载时，因当前目录在安装目录内导致文件删不掉',
+    ],
+  },
+  {
     version: '0.1.6',
     date: '2026-08-17',
     title: '本轮展开方向与回退修复',

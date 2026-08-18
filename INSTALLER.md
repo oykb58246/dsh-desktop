@@ -78,11 +78,15 @@ pnpm dist:win
 - 品牌蓝 `#4D6BFE`；背景海洋渐变来自 `installer-bg.png`。
 - 目录页：标题「选择安装目录」、输入框（90,232,470,36）+ 浏览按钮（570,232,100,36）、
   容量提示「本次安装约需 X · 目标盘剩余 Y」（`GetDiskFreeSpaceExW`）、安装按钮（590,386,130,44）。
+  默认目录：有 `C:\dsh-desktop.ini` 则用上次 `InstallPath`，否则
+  `C:\Program Files\DSH Desktop`。浏览或点「安装」时，若所选路径最后一级
+  不是 `DSH Desktop`（不区分大小写）则自动补上。
 - **单实例**：`CreateMutexW`（`Local\` 会话级）防重复打开；第二个实例激活已有窗口后退出。
   提权交接（`--dir`）实例会短暂重试互斥量，原实例在 `relaunchElevated` 前 `releaseSingleInstance`。
 - **更新 = 下载 + 启动安装器**：内置更新器下载安装包（优先增量包）后以普通令牌打开
   exe（等同双击）。用户走与首次安装相同的三步流程：选目录（默认取
-  `C:\dsh-desktop.ini` 的上次安装目录）→ 点「安装」或「更新」（此时才提权）→ 完成页勾选启动。
+  `C:\dsh-desktop.ini` 的上次安装目录；无 ini 则为 `C:\Program Files\DSH Desktop`）
+  → 点「安装」或「更新」（此时才提权）→ 完成页勾选启动。
   安装前进程检测会询问是否结束正在运行的 DSH Desktop，因此更新时应用无需先退出；
   **不存在任何静默覆盖通道**（`--installer-worker` 自更新模式已移除）。
 - **安装时增量覆盖**：payload manifest 带每文件 `sha256`。目标文件已存在且哈希一致则跳过写入。
@@ -134,6 +138,17 @@ pnpm dist:win
     `ShellExecuteW(runas)` 带 `--dir <目录>` 重拉一次 UAC，提权副本直接进进度页安装；
     用户取消 UAC 或设 `DSH_SETUP_NO_ELEVATE=1`（自动化/UI 测试）则降级为普通令牌安装，
     特权步骤静默失败。
+13. **卸载脚本绝不能以安装目录为当前目录**：Explorer /「设置 → 应用」启动
+    `Uninstall.exe` 时 cwd 就是安装目录；`Start-Process -Verb RunAs` 会把这个 cwd
+    传给提权后的 PowerShell。`Remove-Item -Recurse` / `rmdir /s` 删自己的 cwd
+    会静默失败，文件全部留下，完成框却写「已卸载」。必须
+    `ShellExecuteW(runas)` 的 `lpDirectory` 设为 `%TEMP%`，脚本开头再
+    `Set-Location $env:TEMP`，然后才 `rmdir`。PowerShell 5.1 `-File` 读无 BOM
+    的 UTF-8 会按系统 ANSI 解码，「卸载 DSH Desktop.lnk」路径会写坏；
+    卸载/建快捷方式的 `.ps1` 都必须带 UTF-8 BOM。另：`WScript.Shell.Save`
+    走系统 ANSI 代码页（本机常见 CP1252），中文文件名会变成 `??` 导致
+    无法写入；先存 ASCII 临时 `.lnk`，再用 `Rename-Item`（Unicode）改成
+    「卸载 DSH Desktop.lnk」。
 
 ## 八、安装后动作（`installTo`）
 
@@ -141,6 +156,7 @@ pnpm dist:win
    （`warmQueue`/`warmWorker`），把杀软扫描与系统缓存预热分摊到安装过程中；复制结束
    后在「正在初始化应用…」阶段排空队列。首次启动因此省掉冷读 + 实时扫描的大头开销。
 1. 写 `C:\dsh-desktop.ini`（`InstallPath=...`），作为下次默认目录。
+   **卸载不得删除此文件**，以便重装/更新仍落到上次目录。
 2. 注册表卸载项 `HKLM\...\Uninstall\2964e23e-3f18-500c-b3e7-68e9fa24df7a`，
    `UninstallString` 指向安装目录里的 `Uninstall.exe`（`uninstaller/main.go`，
    由 `append-payload.mjs` 编进 shell 段）。
